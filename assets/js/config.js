@@ -10,7 +10,7 @@ window.ABS_CONFIG = {
 
   // --- Backend ---------------------------------------------------------
   // Paste your deployed Apps Script Web App URL here (ends with /exec)
-  API_URL: "https://script.google.com/macros/s/AKfycbzisUWnDrW15tjB36KM90z5Ab6iZcZsoWki2tIp_1xG2EqeSe8cmYBE63-ADQUYNP5Y/exec",
+  API_URL: "https://script.google.com/macros/s/AKfycbz7tHSyERDRNsCHr4Jh9Z7T0dW7UpEyDfBNvYkIbZUBNLVbhsYG1TBMaL6Z3iQ3ykhF/exec",
 
   // --- Branding --------------------------------------------------------
   APP_NAME: "Adil Business Solutions",
