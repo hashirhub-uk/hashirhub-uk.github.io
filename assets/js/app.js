@@ -1,5 +1,5 @@
 /* =====================================================================
-   Adil Business Solutions — App bootstrap
+   Adil Business Solutions — App bootstrap  v7.5
    Decides login vs app, builds the chrome, starts the router.
    ===================================================================== */
 
@@ -12,9 +12,16 @@ const App = {
 
   // --- Login screen ----------------------------------------------------
   showLogin() {
-    const cfg = window.ABS_CONFIG;
-    document.body.className = "view-login";
-    document.body.innerHTML = `
+    const cfg       = window.ABS_CONFIG;
+    const companies = window.ABS_COMPANIES || [];
+
+    // Build company options
+    const companyOptions = companies.map((c, i) =>
+      `<option value="${i}">${c.name}</option>`
+    ).join("");
+
+    document.body.className  = "view-login";
+    document.body.innerHTML  = `
       <div class="login-wrap">
         <div class="login-card">
           <div class="brand brand--lg">
@@ -25,6 +32,12 @@ const App = {
             </span>
           </div>
           <form id="login-form" class="login-form" autocomplete="on">
+            ${companies.length > 1 ? `
+            <label>Company
+              <select name="company_index" id="company-select">
+                ${companyOptions}
+              </select>
+            </label>` : ""}
             <label>Username
               <input name="username" type="text" required autofocus>
             </label>
@@ -40,17 +53,31 @@ const App = {
 
     const form = document.getElementById("login-form");
     const err  = document.getElementById("login-error");
+
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       err.textContent = "";
-      const fd = new FormData(form);
+      const fd       = new FormData(form);
+      const idx      = parseInt(fd.get("company_index") || "0", 10);
+      const company  = companies[idx] || companies[0];
+
+      if (!company) {
+        err.textContent = "No companies configured. Add entries to companies.js.";
+        return;
+      }
+
+      // Temporarily store the selected URL so API.call() works during login
+      const tempSession = { api_url: company.url, token: null, user: null };
+      Session.set(tempSession);
+
       UI.loading(true, "Signing in…");
       try {
         const res = await API.login(fd.get("username").trim(), fd.get("password"));
-        Session.set({ token: res.token, user: res.user });
+        Session.set({ token: res.token, user: res.user, api_url: company.url, company_name: company.name });
         UI.loading(false);
         this.showApp();
       } catch (ex) {
+        Session.clear();
         UI.loading(false);
         err.textContent = ex.message;
       }
@@ -59,14 +86,17 @@ const App = {
 
   // --- Main application chrome -----------------------------------------
   showApp() {
-    const cfg = window.ABS_CONFIG;
+    const cfg  = window.ABS_CONFIG;
     const user = Session.user() || { name: "User" };
+    const sess = Session.get() || {};
+    const companyLabel = sess.company_name || cfg.APP_NAME;
+
     document.body.className = "view-app";
     document.body.innerHTML = `
       <aside id="sidebar" class="sidebar">
         <div class="brand">
           <span class="brand-mark">${UI.escape(cfg.APP_SHORT)}</span>
-          <span class="brand-text"><strong>${UI.escape(cfg.APP_NAME)}</strong><em>${UI.escape(cfg.TAGLINE)}</em></span>
+          <span class="brand-text"><strong>${UI.escape(companyLabel)}</strong><em>${UI.escape(cfg.TAGLINE)}</em></span>
         </div>
         <nav class="nav">${this.buildNav(cfg.MENU)}</nav>
         <div class="sidebar-foot">v${UI.escape(cfg.VERSION)}</div>
@@ -95,17 +125,15 @@ const App = {
     });
     this.wireGlobalSearch();
     const sidebar = document.getElementById("sidebar");
-    const scrim = document.getElementById("scrim");
+    const scrim   = document.getElementById("scrim");
     document.getElementById("menu-toggle").addEventListener("click", () => {
       sidebar.classList.toggle("open"); scrim.classList.toggle("show");
     });
     scrim.addEventListener("click", () => { sidebar.classList.remove("open"); scrim.classList.remove("show"); });
 
-    // expandable groups
     UI.$$(".nav-group > .nav-group-head").forEach(h => {
       h.addEventListener("click", () => h.parentElement.classList.toggle("open"));
     });
-    // close mobile sidebar on navigation
     UI.$$(".nav-link").forEach(a => a.addEventListener("click", () => {
       sidebar.classList.remove("open"); scrim.classList.remove("show");
     }));
@@ -120,11 +148,11 @@ const App = {
     if (!input || !panel) return;
     let timer = null, lastQ = "";
     const hide = () => { panel.classList.remove("show"); panel.innerHTML = ""; };
-    const run = async (q) => {
+    const run  = async (q) => {
       try {
         const rows = await API.searchDocuments(q);
-        if (input.value.trim() !== q) return; // stale
-        if (!rows.length) { panel.innerHTML = `<div class="search-empty">No matches for “${UI.escape(q)}”</div>`; panel.classList.add("show"); return; }
+        if (input.value.trim() !== q) return;
+        if (!rows.length) { panel.innerHTML = `<div class="search-empty">No matches for "${UI.escape(q)}"</div>`; panel.classList.add("show"); return; }
         panel.innerHTML = rows.map(r => `
           <a class="search-row" data-route="${UI.escape(r.route)}" data-id="${UI.escape(r.id)}">
             <span class="search-type">${UI.escape(r.type)}</span>
@@ -142,18 +170,17 @@ const App = {
       const q = input.value.trim();
       clearTimeout(timer);
       if (q.length < 2) { hide(); return; }
-      if (q === lastQ) return; lastQ = q;
+      if (q === lastQ)  return;
+      lastQ = q;
       panel.innerHTML = `<div class="search-empty">Searching…</div>`; panel.classList.add("show");
       timer = setTimeout(() => run(q), 250);
     });
-    document.addEventListener("click", (e) => {
-      if (!e.target.closest(".topbar-search")) hide();
-    });
+    document.addEventListener("click", (e) => { if (!e.target.closest(".topbar-search")) hide(); });
   },
 
   buildNav(menu) {
     const built = new Set(window.ABS_CONFIG.BUILT_ROUTES || []);
-    const link = (item) => {
+    const link  = (item) => {
       const ready = built.has(item.route) ? "" : " is-soon";
       return `<a class="nav-link${ready}" data-route="${item.route}" href="#${item.route}">
         <span class="nav-label">${UI.escape(item.label)}</span>
