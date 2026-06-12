@@ -1,8 +1,8 @@
 /* =====================================================================
-   Adil Business Solutions — Configuration
+   Adil Business Solutions — Configuration  v7.5
    ---------------------------------------------------------------------
    API_URL is now managed per-company in assets/js/companies.js.
-   You no longer need to edit this file when adding a new client.
+   Edit the COMPANY block below to match your business details.
    ===================================================================== */
 
 window.ABS_CONFIG = {
@@ -12,6 +12,18 @@ window.ABS_CONFIG = {
   APP_SHORT: "ABS",
   TAGLINE:   "Invoicing & Inventory",
 
+  // --- Company (shown on dashboard and printed documents) --------------
+  COMPANY: {
+    name:            "Adil Business Solutions",
+    address:         "Your address line, City, Country",
+    phone:           "+00 000 0000000",
+    email:           "info@adilbusiness.example",
+    currency:        "PKR",
+    currency_symbol: "Rs",
+    tax_percent:     0,
+    invoice_prefix:  "INV-"
+  },
+
   // --- Version ---------------------------------------------------------
   VERSION: "7.5",
 
@@ -20,33 +32,33 @@ window.ABS_CONFIG = {
     { label: "Dashboard", icon: "home", route: "home" },
 
     { label: "Settings", icon: "settings", children: [
-      { label: "Categories",           route: "categories" },
-      { label: "Brands",               route: "brands" },
-      { label: "Stores",               route: "stores" },
-      { label: "Warehouses",           route: "warehouses" },
-      { label: "Regions & Areas",      route: "areas" },
-      { label: "Price Lists",          route: "price-lists" },
-      { label: "Templates",            route: "templates" },
-      { label: "UOM",                  route: "uom" },
-      { label: "Sales Representatives",route: "sales-representatives" },
-      { label: "Users",                route: "users" },
-      { label: "Company Information",  route: "company-information" },
-      { label: "Appearance",           route: "appearance" }
+      { label: "Categories",            route: "categories" },
+      { label: "Brands",                route: "brands" },
+      { label: "Stores",                route: "stores" },
+      { label: "Warehouses",            route: "warehouses" },
+      { label: "Regions & Areas",       route: "areas" },
+      { label: "Price Lists",           route: "price-lists" },
+      { label: "Templates",             route: "templates" },
+      { label: "UOM",                   route: "uom" },
+      { label: "Sales Representatives", route: "sales-representatives" },
+      { label: "Users",                 route: "users" },
+      { label: "Company Information",   route: "company-information" },
+      { label: "Appearance",            route: "appearance" }
     ]},
 
     { label: "Items", icon: "box", children: [
-      { label: "Item List",        route: "items" },
-      { label: "Item Search",      route: "item-search" },
-      { label: "New Item",         route: "new-item" },
-      { label: "Inventory Alert",  route: "inventory-alert" },
-      { label: "Expired Inventory",route: "expired-inventory" },
-      { label: "Price Manager",    route: "price-manager" }
+      { label: "Item List",         route: "items" },
+      { label: "Item Search",       route: "item-search" },
+      { label: "New Item",          route: "new-item" },
+      { label: "Inventory Alert",   route: "inventory-alert" },
+      { label: "Expired Inventory", route: "expired-inventory" },
+      { label: "Price Manager",     route: "price-manager" }
     ]},
 
     { label: "E-Commerce Info", icon: "cart", children: [
-      { label: "Slideshow",             route: "slideshow" },
-      { label: "Campaign Manager",      route: "campaign-manager" },
-      { label: "Notification Manager",  route: "notification-manager" }
+      { label: "Slideshow",            route: "slideshow" },
+      { label: "Campaign Manager",     route: "campaign-manager" },
+      { label: "Notification Manager", route: "notification-manager" }
     ]},
 
     { label: "Accounts", icon: "layers", children: [
@@ -60,29 +72,29 @@ window.ABS_CONFIG = {
     ]},
 
     { label: "Transactions", icon: "file-text", children: [
-      { label: "All Transactions",       route: "all-transactions" },
-      { label: "Purchase Order",         route: "purchase-orders" },
-      { label: "Bills",                  route: "bills" },
-      { label: "Expenses",               route: "expenses" },
-      { label: "Suppliers",              route: "suppliers" },
-      { label: "Customers",              route: "customers" },
-      { label: "Sales Orders",           route: "sales-orders" },
-      { label: "Quotations",             route: "quotations" },
-      { label: "Invoices",               route: "invoices" },
-      { label: "Sales Receipts",         route: "sales-receipts" },
-      { label: "Credit Memo / Refunds",  route: "credit-memos" },
-      { label: "Claims",                 route: "claims" },
-      { label: "Inventory Transfers",    route: "inventory-transfer" },
-      { label: "Inventory Adjustments",  route: "inventory-adjustments" },
-      { label: "Bulk SMS",               route: "bulk-sms" }
+      { label: "All Transactions",      route: "all-transactions" },
+      { label: "Purchase Order",        route: "purchase-orders" },
+      { label: "Bills",                 route: "bills" },
+      { label: "Expenses",              route: "expenses" },
+      { label: "Suppliers",             route: "suppliers" },
+      { label: "Customers",             route: "customers" },
+      { label: "Sales Orders",          route: "sales-orders" },
+      { label: "Quotations",            route: "quotations" },
+      { label: "Invoices",              route: "invoices" },
+      { label: "Sales Receipts",        route: "sales-receipts" },
+      { label: "Credit Memo / Refunds", route: "credit-memos" },
+      { label: "Claims",                route: "claims" },
+      { label: "Inventory Transfers",   route: "inventory-transfer" },
+      { label: "Inventory Adjustments", route: "inventory-adjustments" },
+      { label: "Bulk SMS",              route: "bulk-sms" }
     ]},
 
     { label: "Reports", icon: "chart", children: [
-      { label: "All Reports",           route: "all-reports" },
-      { label: "Company & Financial",   route: "reports-company-financial" },
-      { label: "Receivables",           route: "reports-receivables" },
-      { label: "Payables",              route: "reports-payables" },
-      { label: "Accounts",              route: "reports-accounts" }
+      { label: "All Reports",         route: "all-reports" },
+      { label: "Company & Financial", route: "reports-company-financial" },
+      { label: "Receivables",         route: "reports-receivables" },
+      { label: "Payables",            route: "reports-payables" },
+      { label: "Accounts",            route: "reports-accounts" }
     ]}
   ],
 
