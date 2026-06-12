@@ -1,18 +1,16 @@
 /* =====================================================================
-   Adil Business Solutions — Configuration  v7.5
-   ---------------------------------------------------------------------
-   API_URL is now managed per-company in assets/js/companies.js.
-   Edit the COMPANY block below to match your business details.
+   Adil Business Solutions — Configuration  v7.7
    ===================================================================== */
 
 window.ABS_CONFIG = {
 
-  // --- Branding --------------------------------------------------------
   APP_NAME: "Adil Business Solutions",
   APP_SHORT: "ABS",
   TAGLINE:   "Invoicing & Inventory",
 
-  // --- Company (shown on dashboard and printed documents) --------------
+  // API_URL kept as fallback in case session has no api_url
+  API_URL: "https://script.google.com/macros/s/AKfycbz7tHSyERDRNsCHr4Jh9Z7T0dW7UpEyDfBNvYkIbZUBNLVbhsYG1TBMaL6Z3iQ3ykhF/exec",
+
   COMPANY: {
     name:            "Adil Business Solutions",
     address:         "Your address line, City, Country",
@@ -24,10 +22,8 @@ window.ABS_CONFIG = {
     invoice_prefix:  "INV-"
   },
 
-  // --- Version ---------------------------------------------------------
-  VERSION: "7.6",
+  VERSION: "7.7",
 
-  // --- Sidebar menu ----------------------------------------------------
   MENU: [
     { label: "Dashboard", icon: "home", route: "home" },
 

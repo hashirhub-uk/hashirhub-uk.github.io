@@ -8,7 +8,7 @@ Router.register("home", async (mount) => {
   const cfg = window.ABS_CONFIG;
 
   mount.innerHTML = `
-    <div class="page-head"><h1>Dashboard</h1><span class="page-sub">${UI.escape(cfg.COMPANY.name)}</span></div>
+    <div class="page-head"><h1>Dashboard</h1><span class="page-sub">${UI.escape((cfg.COMPANY && cfg.COMPANY.name) || cfg.APP_NAME)}</span></div>
 
     <div class="kpi-grid" id="sales-kpis">
       ${salesCard("today", "Today's Sales")}

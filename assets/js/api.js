@@ -1,8 +1,5 @@
 /* =====================================================================
-   Adil Business Solutions — API layer  v7.5
-   ---------------------------------------------------------------------
-   API_URL is now stored per-session (set at login from companies.js).
-   Every call reads it from Session.apiUrl() instead of ABS_CONFIG.
+   Adil Business Solutions — API layer  v7.7
    ===================================================================== */
 
 const Session = {
@@ -17,8 +14,13 @@ const Session = {
 
 const API = {
 
+  configured() {
+    const u = Session.apiUrl() || window.ABS_CONFIG.API_URL;
+    return !!(u && u !== "PASTE_YOUR_WEB_APP_URL_HERE" && /^https:\/\//.test(u));
+  },
+
   _url() {
-    const u = Session.apiUrl();
+    const u = Session.apiUrl() || window.ABS_CONFIG.API_URL;
     if (!u) throw new Error("No company selected. Please sign in again.");
     return u;
   },
@@ -44,7 +46,6 @@ const API = {
     return json.data;
   },
 
-  // --- convenience wrappers -------------------------------------------
   ping()                     { return this.call("ping"); },
   login(username, password)  { return this.call("login", { username, password }); },
   dashboard()                { return this.call("dashboard"); },
