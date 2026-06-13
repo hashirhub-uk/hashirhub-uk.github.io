@@ -25,6 +25,7 @@ const CompanySettings = {
       co.logo = s.logo || '';
       co.theme_color = s.theme_color || '';
       co.font_family = s.font_family || '';
+      co.sidebar_color = s.sidebar_color || 'dark';
       this.applyBrand();
       this.applyTheme();
       return s;
@@ -36,8 +37,8 @@ const CompanySettings = {
 
   applyTheme() {
     const co = window.ABS_CONFIG.COMPANY;
-    const c = (THEME_COLORS.find(x => x.id === co.theme_color));
     const root = document.documentElement;
+    const c = THEME_COLORS.find(x => x.id === co.theme_color);
     if (c) {
       root.style.setProperty('--accent', c.accent);
       root.style.setProperty('--accent-2', c.accent2);
@@ -47,6 +48,23 @@ const CompanySettings = {
     }
     const f = THEME_FONTS.find(x => x.id === co.font_family);
     document.body.style.fontFamily = f ? f.stack : '';
+    // apply sidebar color
+    const SIDEBAR_COLORS_DEF = [
+      { id:'dark',bg:'#0e1a2b',hover:'#16263b',border:'#233448',text:'#cfd9e4'},
+      { id:'navy',bg:'#1a2a50',hover:'#24376b',border:'#2f4580',text:'#c8d4f0'},
+      { id:'forest',bg:'#1a3328',hover:'#234435',border:'#2c5542',text:'#c2ddd2'},
+      { id:'burgundy',bg:'#3b1223',hover:'#4e1b31',border:'#621e3d',text:'#e8c4cf'},
+      { id:'charcoal',bg:'#2d2d2d',hover:'#3a3a3a',border:'#444',text:'#d0d0d0'},
+      { id:'slate',bg:'#334155',hover:'#3f5068',border:'#4a5f78',text:'#cbd5e1'},
+      { id:'light',bg:'#f1f5f9',hover:'#e2e8f0',border:'#cbd5e1',text:'#334155'}
+    ];
+    const s = SIDEBAR_COLORS_DEF.find(x => x.id === (co.sidebar_color || 'dark'));
+    if (s) {
+      root.style.setProperty('--sidebar-bg', s.bg);
+      root.style.setProperty('--sidebar-hover', s.hover);
+      root.style.setProperty('--sidebar-border', s.border);
+      root.style.setProperty('--sidebar-text', s.text);
+    }
   }
 };
 
@@ -68,10 +86,21 @@ const THEME_FONTS = [
   { id: 'rounded',name: 'Rounded',             stack: 'ui-rounded, "Hiragino Maru Gothic ProN", "Quicksand", "Segoe UI", system-ui, sans-serif' }
 ];
 
+const SIDEBAR_COLORS = [
+  { id: 'dark',      name: 'Dark',      bg: '#0e1a2b', hover: '#16263b', border: '#233448', text: '#cfd9e4' },
+  { id: 'navy',      name: 'Navy',      bg: '#1a2a50', hover: '#24376b', border: '#2f4580', text: '#c8d4f0' },
+  { id: 'forest',    name: 'Forest',    bg: '#1a3328', hover: '#234435', border: '#2c5542', text: '#c2ddd2' },
+  { id: 'burgundy',  name: 'Burgundy',  bg: '#3b1223', hover: '#4e1b31', border: '#621e3d', text: '#e8c4cf' },
+  { id: 'charcoal',  name: 'Charcoal',  bg: '#2d2d2d', hover: '#3a3a3a', border: '#444',    text: '#d0d0d0' },
+  { id: 'slate',     name: 'Slate',     bg: '#334155', hover: '#3f5068', border: '#4a5f78', text: '#cbd5e1' },
+  { id: 'light',     name: 'Light',     bg: '#f1f5f9', hover: '#e2e8f0', border: '#cbd5e1', text: '#334155' }
+];
+
 Router.register('appearance', (mount) => {
   const co = window.ABS_CONFIG.COMPANY;
-  let pickColor = co.theme_color || 'teal';
-  let pickFont = co.font_family || 'system';
+  let pickColor  = co.theme_color   || 'teal';
+  let pickFont   = co.font_family   || 'system';
+  let pickSidebar = co.sidebar_color || 'dark';
 
   mount.innerHTML = `
     <div class="page-head"><h1>Appearance</h1><span class="page-sub">Customize how the app looks</span>
@@ -82,6 +111,13 @@ Router.register('appearance', (mount) => {
       <p class="muted">Used for buttons, links, highlights and active menu items.</p>
       <div class="swatch-grid" id="ap-colors">
         ${THEME_COLORS.map(c => `<button class="swatch${c.id === pickColor ? ' selected' : ''}" data-id="${c.id}" title="${c.name}" style="background:${c.accent}"><span>${UI.escape(c.name)}</span></button>`).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Sidebar color</h2></div>
+      <p class="muted">Changes the background color of the left navigation bar.</p>
+      <div class="swatch-grid" id="ap-sidebar">
+        ${SIDEBAR_COLORS.map(s => `<button class="swatch${s.id === pickSidebar ? ' selected' : ''}" data-id="${s.id}" title="${s.name}" style="background:${s.bg};border-color:${s.id === pickSidebar ? '#fff' : 'transparent'}"><span style="color:${s.text}">${UI.escape(s.name)}</span></button>`).join('')}
       </div>
     </div>
     <div class="card">
@@ -96,13 +132,24 @@ Router.register('appearance', (mount) => {
     if (c) { root.style.setProperty('--accent', c.accent); root.style.setProperty('--accent-2', c.accent2); root.style.setProperty('--accent-ink', c.ink); }
     const f = THEME_FONTS.find(x => x.id === pickFont);
     document.body.style.fontFamily = f ? f.stack : '';
+    const s = SIDEBAR_COLORS.find(x => x.id === pickSidebar);
+    if (s) {
+      root.style.setProperty('--sidebar-bg', s.bg);
+      root.style.setProperty('--sidebar-hover', s.hover);
+      root.style.setProperty('--sidebar-border', s.border);
+      root.style.setProperty('--sidebar-text', s.text);
+    }
   };
   mount.querySelectorAll('#ap-colors .swatch').forEach(b => b.onclick = () => { pickColor = b.dataset.id; mount.querySelectorAll('#ap-colors .swatch').forEach(x => x.classList.toggle('selected', x === b)); live(); });
+  mount.querySelectorAll('#ap-sidebar .swatch').forEach(b => b.onclick = () => { pickSidebar = b.dataset.id; mount.querySelectorAll('#ap-sidebar .swatch').forEach(x => x.classList.toggle('selected', x === b)); live(); });
   mount.querySelectorAll('#ap-fonts .font-option').forEach(b => b.onclick = () => { pickFont = b.dataset.id; mount.querySelectorAll('#ap-fonts .font-option').forEach(x => x.classList.toggle('selected', x === b)); live(); });
   mount.querySelector('#ap-save').onclick = async () => {
     UI.loading(true, 'Saving…');
-    try { await API.call('saveSettings', { data: { theme_color: pickColor, font_family: pickFont } }); await CompanySettings.loadCompany(); UI.loading(false); UI.toast('Appearance saved.', 'success'); }
-    catch (e) { UI.loading(false); UI.toast(e.message, 'error'); }
+    try {
+      await API.call('saveSettings', { data: { theme_color: pickColor, font_family: pickFont, sidebar_color: pickSidebar } });
+      await CompanySettings.loadCompany();
+      UI.loading(false); UI.toast('Appearance saved.', 'success');
+    } catch (e) { UI.loading(false); UI.toast(e.message, 'error'); }
   };
 });
 window.CompanySettings = CompanySettings;

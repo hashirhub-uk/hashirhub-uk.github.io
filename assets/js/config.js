@@ -22,7 +22,7 @@ window.ABS_CONFIG = {
     invoice_prefix:  "INV-"
   },
 
-  VERSION: "7.7",
+  VERSION: "7.8",
 
   MENU: [
     { label: "Dashboard", icon: "home", route: "home" },
@@ -90,9 +90,10 @@ window.ABS_CONFIG = {
       { label: "Company & Financial", route: "reports-company-financial" },
       { label: "Receivables",         route: "reports-receivables" },
       { label: "Payables",            route: "reports-payables" },
-      { label: "Accounts",            route: "reports-accounts" }
+      { label: "Accounts",            route: "reports-accounts" },
+      { label: "Inventory",           route: "reports-inventory" }
     ]}
   ],
 
-  BUILT_ROUTES: ["home","items","new-item","customers","suppliers","categories","brands","uom","tax-types","areas","sales-representatives","invoices","new-invoice","sales-receipts","new-sales-receipt","all-transactions","stores","warehouses","price-lists","users","company-information","accounts","account-ledger","general-journal","new-general-journal-entry","receive-payments","view-payments","show-undeposited-list","view-deposits","transfer-funds","check-register","pay-bills","view-paid-bills","purchase-orders","new-purchase-order","edit-purchase-order","bills","new-bill","edit-bill","sales-orders","new-sales-order","edit-sales-order","quotations","new-quotation","edit-quotation","credit-memos","new-credit-memo","edit-credit-memo","expenses","new-expense","edit-expense","inventory-transfer","new-inventory-transfer","edit-inventory-transfer","inventory-adjustments","new-inventory-adjustment","edit-inventory-adjustment","claims","new-claim","edit-claim","item-search","price-manager","inventory-alert","all-reports","report-pl","report-balance-sheet","report-trial-balance","report-income-customer","report-transactions-summary","reports-company-financial","reports-receivables","reports-payables","reports-accounts","report-customer-balances","report-payment-collection","report-customer-statement","report-account-statement","report-supplier-balances","report-supplier-statement","report-journal","report-general-ledger","appearance","bulk-sms","customer-payments"]
+  BUILT_ROUTES: ["home","items","new-item","customers","suppliers","categories","brands","uom","tax-types","areas","sales-representatives","invoices","new-invoice","sales-receipts","new-sales-receipt","all-transactions","stores","warehouses","price-lists","users","company-information","accounts","account-ledger","general-journal","new-general-journal-entry","receive-payments","view-payments","show-undeposited-list","view-deposits","transfer-funds","check-register","pay-bills","view-paid-bills","purchase-orders","new-purchase-order","edit-purchase-order","bills","new-bill","edit-bill","sales-orders","new-sales-order","edit-sales-order","quotations","new-quotation","edit-quotation","credit-memos","new-credit-memo","edit-credit-memo","expenses","new-expense","edit-expense","inventory-transfer","new-inventory-transfer","edit-inventory-transfer","inventory-adjustments","new-inventory-adjustment","edit-inventory-adjustment","claims","new-claim","edit-claim","item-search","price-manager","inventory-alert","all-reports","report-pl","report-balance-sheet","report-trial-balance","report-income-customer","report-transactions-summary","reports-company-financial","reports-receivables","reports-payables","reports-accounts","report-customer-balances","report-payment-collection","report-customer-statement","report-account-statement","report-supplier-balances","report-supplier-statement","report-journal","report-general-ledger","appearance","bulk-sms","customer-payments","reports-inventory","report-inv-onhand","report-inv-valuation","report-inv-damaged","report-inv-movement","report-inv-vendor","report-inv-worksheet"]
 };

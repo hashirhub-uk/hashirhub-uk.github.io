@@ -240,6 +240,12 @@ function handle_(e) {
       case 'reportSupplierStatement': return out_({ ok: true, data: reportSupplierStatement_(p) });
       case 'reportJournal': return out_({ ok: true, data: reportJournal_(p) });
       case 'reportGeneralLedger': return out_({ ok: true, data: reportGeneralLedger_(p) });
+      case 'reportInventoryOnhand':    return out_({ ok: true, data: reportInventoryOnhand_(p) });
+      case 'reportInventoryValuation': return out_({ ok: true, data: reportInventoryValuation_(p) });
+      case 'reportInventoryDamaged':   return out_({ ok: true, data: reportInventoryDamaged_(p) });
+      case 'reportInventoryMovement':  return out_({ ok: true, data: reportInventoryMovement_(p) });
+      case 'reportInventoryVendor':    return out_({ ok: true, data: reportInventoryVendor_(p) });
+      case 'reportInventoryWorksheet': return out_({ ok: true, data: reportInventoryWorksheet_(p) });
       case 'searchDocuments': return out_({ ok: true, data: searchDocs_(p.q) });
       case 'itemCard': return out_({ ok: true, data: itemCard_(p.item_id) });
       case 'updatePrices': return out_({ ok: true, data: updatePrices_(p.updates) });
@@ -1919,3 +1925,165 @@ function deleteDeposit_(p) {
   try { postEntry_({ date: dayKey_(dep.date), memo: 'Reverse deposit ' + dep.deposit_no, source_type: 'deposit_reversal', source_id: 'DEPR' + Date.now(), created_by: userFromToken_(p.token), lines: [{ account_id: acctId_('undeposited'), debit: Number(dep.total || 0), credit: 0 }, { account_id: dep.account_id, debit: 0, credit: Number(dep.total || 0) }] }); } catch (e) {}
   return { id: id, deleted: true };
 }
+
+// =====================================================================
+//  INVENTORY REPORTS  (v7.8)
+// =====================================================================
+
+function reportInventoryOnhand_(p) {
+  var cats = nameMap_('Categories'), brands = nameMap_('Brands'), whs = {};
+  rows_('Warehouses').forEach(function(w){ whs[String(w.id)] = w.warehouse_name; });
+  var oh = onHandMap_();
+  var items = list_('Items', {});
+
+  // warehouse filter: look up items that appear in adjustments for that warehouse
+  var whFilter = String(p.warehouse || '');
+  if (whFilter) {
+    var adjItemIds = {};
+    rows_('InventoryAdjustments').filter(function(a){ return String(a.warehouse) === whFilter; })
+      .forEach(function(adj){
+        rows_('InventoryAdjustmentItems').filter(function(ai){ return String(ai.adjustment_id) === String(adj.id); })
+          .forEach(function(ai){ adjItemIds[String(ai.item_id)] = true; });
+      });
+    if (Object.keys(adjItemIds).length) items = items.filter(function(it){ return adjItemIds[String(it.id)]; });
+  }
+  var catFilter = String(p.category || '');
+  if (catFilter) items = items.filter(function(it){ return String(it.category_id) === catFilter; });
+
+  return items.map(function(it){
+    return { name: it.name, sku: it.sku || '', category: cats[String(it.category_id)] || '',
+      brand: brands[String(it.brand_id)] || '', on_hand: oh[String(it.id)] || 0,
+      reorder: Number(it.reorder_level || 0), status: (oh[String(it.id)] || 0) <= 0 ? 'Out' : (oh[String(it.id)] || 0) <= Number(it.reorder_level || 0) ? 'Low' : 'OK' };
+  });
+}
+
+function reportInventoryValuation_(p) {
+  var cats = nameMap_('Categories'), brands = nameMap_('Brands');
+  var oh = onHandMap_();
+  var items = list_('Items', {});
+
+  var whFilter = String(p.warehouse || '');
+  if (whFilter) {
+    var adjItemIds = {};
+    rows_('InventoryAdjustments').filter(function(a){ return String(a.warehouse) === whFilter; })
+      .forEach(function(adj){
+        rows_('InventoryAdjustmentItems').filter(function(ai){ return String(ai.adjustment_id) === String(adj.id); })
+          .forEach(function(ai){ adjItemIds[String(ai.item_id)] = true; });
+      });
+    if (Object.keys(adjItemIds).length) items = items.filter(function(it){ return adjItemIds[String(it.id)]; });
+  }
+  var catFilter = String(p.category || '');
+  if (catFilter) items = items.filter(function(it){ return String(it.category_id) === catFilter; });
+
+  var total = 0;
+  var rows = items.map(function(it){
+    var qty = oh[String(it.id)] || 0;
+    var cost = Number(it.cost_price || 0);
+    var value = qty * cost;
+    total += value;
+    return { name: it.name, sku: it.sku || '', category: cats[String(it.category_id)] || '',
+      qty: qty, cost: cost, value: value };
+  });
+  return { rows: rows, total: total };
+}
+
+function reportInventoryDamaged_(p) {
+  var cats = nameMap_('Categories');
+  var oh = onHandMap_();
+  var today = new Date().toISOString().slice(0, 10);
+  var items = list_('Items', {});
+  var catFilter = String(p.category || '');
+  if (catFilter) items = items.filter(function(it){ return String(it.category_id) === catFilter; });
+
+  var res = [];
+  items.forEach(function(it){
+    var qty = oh[String(it.id)] || 0;
+    if (qty <= 0) return;
+    var isExpired = it.expiry_date && String(it.expiry_date).slice(0,10) <= today;
+    var type = isExpired ? 'Expired' : null;
+    if (p.type === 'expired' && !isExpired) return;
+    if (!isExpired && p.type !== 'all' && p.type !== 'damaged') return;
+    if (isExpired || p.type === 'all' || p.type === 'damaged') {
+      if (!isExpired && p.type !== 'all') return;
+      res.push({ name: it.name, sku: it.sku || '', category: cats[String(it.category_id)] || '',
+        type: type || 'Damaged', qty: qty, cost: Number(it.cost_price || 0),
+        value: qty * Number(it.cost_price || 0), expiry: it.expiry_date || '' });
+    }
+  });
+  // Also look at adjustments with damaged type
+  var dmgAdjs = rows_('InventoryAdjustments').filter(function(a){ return /damage|write.?off/i.test(String(a.adjustment_type || '')); });
+  var seen = {};
+  dmgAdjs.forEach(function(adj){
+    rows_('InventoryAdjustmentItems').filter(function(ai){ return String(ai.adjustment_id) === String(adj.id); })
+      .forEach(function(ai){
+        if (seen[String(ai.item_id)]) return;
+        seen[String(ai.item_id)] = true;
+        var it = items.find(function(i){ return String(i.id) === String(ai.item_id); });
+        if (!it) return;
+        if (catFilter && String(it.category_id) !== catFilter) return;
+        var qty = Math.abs(Number(ai.qty_diff || 0));
+        res.push({ name: it.name, sku: it.sku || '', category: cats[String(it.category_id)] || '',
+          type: adj.adjustment_type || 'Damaged', qty: qty, cost: Number(ai.cost || 0),
+          value: Number(ai.value_diff || 0), expiry: it.expiry_date || '' });
+      });
+  });
+  return res;
+}
+
+function reportInventoryMovement_(p) {
+  var cats = nameMap_('Categories'), brands = nameMap_('Brands');
+  var from = String(p.from || ''), to = String(p.to || today_());
+  var catFilter = String(p.category || '');
+  var items = list_('Items', {});
+  if (catFilter) items = items.filter(function(it){ return String(it.category_id) === catFilter; });
+  var movements = rows_('StockMovements');
+
+  var res = items.map(function(it){
+    var id = String(it.id);
+    var opening = 0, inQty = 0, outQty = 0;
+    movements.forEach(function(m){
+      if (String(m.item_id) !== id) return;
+      var d = String(m.date || '').slice(0,10);
+      var qty = Number(m.qty || 0);
+      var isIn = String(m.type) === 'in';
+      if (from && d < from) { opening += isIn ? qty : -qty; return; }
+      if (to && d > to) return;
+      if (isIn) inQty += qty; else outQty += qty;
+    });
+    var closing = opening + inQty - outQty;
+    return { name: it.name, sku: it.sku || '', category: cats[String(it.category_id)] || '',
+      opening: opening, in_qty: inQty, out_qty: outQty, closing: closing };
+  }).filter(function(r){ return r.opening !== 0 || r.in_qty !== 0 || r.out_qty !== 0; });
+
+  return res;
+}
+
+function reportInventoryVendor_(p) {
+  var supps = nameMap_('Suppliers'), cats = nameMap_('Categories');
+  var oh = onHandMap_();
+  var items = list_('Items', {});
+  var suppFilter = String(p.supplier || '');
+  if (suppFilter) items = items.filter(function(it){ return String(it.supplier_id) === suppFilter; });
+  return items.map(function(it){
+    var qty = oh[String(it.id)] || 0;
+    var reorder = Number(it.reorder_level || 0);
+    return { name: it.name, sku: it.sku || '', category: cats[String(it.category_id)] || '',
+      supplier: supps[String(it.supplier_id)] || 'No Supplier',
+      on_hand: qty, reorder: reorder,
+      status: qty <= 0 ? 'Out of Stock' : qty <= reorder ? 'Low Stock' : 'In Stock' };
+  });
+}
+
+function reportInventoryWorksheet_(p) {
+  var cats = nameMap_('Categories'), brands = nameMap_('Brands');
+  var oh = onHandMap_();
+  var items = list_('Items', {});
+  var catFilter = String(p.category || '');
+  if (catFilter) items = items.filter(function(it){ return String(it.category_id) === catFilter; });
+  return items.map(function(it){
+    return { name: it.name, sku: it.sku || '', category: cats[String(it.category_id)] || '',
+      brand: brands[String(it.brand_id)] || '', system_qty: oh[String(it.id)] || 0, actual_qty: '', difference: '' };
+  });
+}
+
+function today_() { return new Date().toISOString().slice(0, 10); }

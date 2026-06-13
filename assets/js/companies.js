@@ -14,7 +14,7 @@ window.ABS_COMPANIES = [
 
   // To add a new client, copy the block below and fill in their details:
   // ,{
-  //   name: "Client Company Name",
-  //   url:  "https://script.google.com/macros/s/THEIR_SCRIPT_ID/exec"
+  //   name: "Trial Client",
+  //   url:  "https://script.google.com/macros/s/AKfycbzyHzuvywemna2dL8J2rRLr-FTGcIb-vnIult3qADeLbagsF-jZr1O-e81EdYEbuyOf1g/exec"
   // }
 ];
