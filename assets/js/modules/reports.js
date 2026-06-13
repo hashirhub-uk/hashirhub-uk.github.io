@@ -38,6 +38,18 @@ const REPORT_TREE = [
   { category: "Purchases", route: "reports-purchases", reports: [
     { name: "Purchases by Suppliers Summary", route: "report-purchases-suppliers" }
   ]},
+  { category: "Discounts", route: "reports-discounts", reports: [
+    { name: "Customers Discounts Summary", route: "report-customer-discounts" },
+    { name: "Items Discounts Summary",     route: "report-item-discounts" }
+  ]},
+  { category: "Sales Orders", route: "reports-sales-orders", reports: [
+    { name: "Sales Orders Summary", route: "report-sales-orders-summary" },
+    { name: "Open Orders Summary",  route: "report-open-orders" }
+  ]},
+  { category: "Misc.", route: "reports-misc", reports: [
+    { name: "Deleted Transactions", route: "report-deleted-transactions" },
+    { name: "Updated Transactions", route: "report-updated-transactions" }
+  ]},
   { category: "Sales", route: "reports-sales", reports: [
     { name: "Sales by Category Summary",                       route: "report-sales-category" },
     { name: "Sales by Items Summary",                          route: "report-sales-items" },
@@ -838,7 +850,10 @@ Router.register("report-purchases-suppliers", async (mount) => {
    SALES REPORTS  (11 subtabs)
    =================================================================== */
 
-Router.register("reports-sales", (m) => reportCategoryPage(m, "Sales"));
+Router.register("reports-discounts",   (m) => reportCategoryPage(m, "Discounts"));
+Router.register("reports-sales-orders",(m) => reportCategoryPage(m, "Sales Orders"));
+Router.register("reports-misc",        (m) => reportCategoryPage(m, "Misc."));
+Router.register("reports-sales",       (m) => reportCategoryPage(m, "Sales"));
 
 // Shared date filter block for sales reports
 function salesDateBlock(defFrom, defTo) {
@@ -1268,4 +1283,240 @@ Router.register("report-customers-items-sales", async (mount) => {
     } catch(e) { UI.toast(e.message, "error"); }
     UI.loading(false);
   });
+});
+
+/* ===================================================================
+   DISCOUNTS REPORTS  (v7.10)
+   =================================================================== */
+
+Router.register("reports-discounts", (m) => reportCategoryPage(m, "Discounts"));
+
+Router.register("report-customer-discounts", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  salesReportPage(mount, "Customers Discounts Summary", (f,t) => salesDateBlock(f,t),
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportCustomerDiscounts", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Customers Discounts Summary</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>Customer</th><th class="num">Transactions</th>
+            <th class="num">Total Sales</th><th class="num">Total Discount</th><th class="num">Discount %</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.customer)}</td><td class="num">${r.invoices}</td>
+            <td class="num">${UI.money(r.total)}</td>
+            <td class="num" style="color:var(--warn)">${UI.money(r.discount)}</td>
+            <td class="num">${r.total?Math.round(r.discount/r.total*1000)/10:0}%</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="5" style="text-align:center;padding:28px">No discounts given in this period.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td><strong>Total</strong></td><td></td>
+            <td class="num"><strong>${UI.money(data.grand_total)}</strong></td>
+            <td class="num" style="color:var(--warn)"><strong>${UI.money(data.grand_discount)}</strong></td>
+            <td class="num"><strong>${data.grand_total?Math.round(data.grand_discount/data.grand_total*1000)/10:0}%</strong></td>
+          </tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  }, "reports-discounts");
+});
+
+Router.register("report-item-discounts", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  let cats = [], brands = [];
+  try { cats = await API.list("categories"); } catch(e){}
+  try { brands = await API.list("brands"); } catch(e){}
+  const catOpts = `<option value="">All Categories</option>${cats.map(c=>`<option value="${UI.escape(String(c.id))}">${UI.escape(c.name)}</option>`).join("")}`;
+  const brandOpts = `<option value="">All Brands</option>${brands.map(b=>`<option value="${UI.escape(String(b.id))}">${UI.escape(b.name)}</option>`).join("")}`;
+  const def = presetDates("This Month-to-date");
+  mount.innerHTML = `
+    <div class="page-head"><h1>Items Discounts Summary</h1>
+      <div class="page-actions">
+        <button class="btn" id="back-btn">← Reports</button>
+        <button class="btn no-print" id="print-btn">${UI.icon("printer")} Print</button>
+      </div>
+    </div>
+    <div class="card no-print">
+      <div class="form-grid">
+        ${salesDateBlock(def.from, def.to)}
+        <label class="field"><span class="field-label">Category</span><select id="f-cat">${catOpts}</select></label>
+        <label class="field"><span class="field-label">Brand</span><select id="f-brand">${brandOpts}</select></label>
+      </div>
+      <div style="margin-top:12px"><button class="btn btn--primary" id="run-btn">View</button></div>
+    </div>
+    <div id="rpt-out"></div>`;
+  mount.querySelector("#back-btn").onclick = () => Router.go("reports-discounts");
+  mount.querySelector("#print-btn").onclick = () => window.print();
+  wireDatePreset(mount);
+  const run = async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const data = await API.call("reportItemDiscounts", {
+        from: mount.querySelector("#f-from").value, to: mount.querySelector("#f-to").value,
+        category: mount.querySelector("#f-cat").value, brand: mount.querySelector("#f-brand").value
+      });
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Items Discounts Summary</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>Item</th><th>Category</th><th>Brand</th>
+            <th class="num">Qty Sold</th><th class="num">Total Sales</th><th class="num">Total Discount</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.name)}</td><td>${UI.escape(r.category)}</td><td>${UI.escape(r.brand)}</td>
+            <td class="num">${r.qty}</td><td class="num">${UI.money(r.total)}</td>
+            <td class="num" style="color:var(--warn)">${UI.money(r.discount)}</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="6" style="text-align:center;padding:28px">No item discounts found.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td colspan="5"><strong>Total Discount</strong></td>
+            <td class="num" style="color:var(--warn)"><strong>${UI.money(data.grand_discount)}</strong></td></tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  };
+  mount.querySelector("#run-btn").onclick = run;
+  run();
+});
+
+/* ===================================================================
+   SALES ORDERS REPORTS  (v7.10)
+   =================================================================== */
+
+Router.register("reports-sales-orders", (m) => reportCategoryPage(m, "Sales Orders"));
+
+Router.register("report-sales-orders-summary", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  salesReportPage(mount, "Sales Orders Summary", (f,t) => salesDateBlock(f,t),
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportSalesOrdersSummary", { from, to });
+      const statusBadge = s => {
+        const m = {open:'badge--ok',pending:'badge--warn',closed:'badge--bad',cancelled:'badge--bad',approved:'badge--ok'};
+        return `<span class="badge ${m[String(s).toLowerCase()]||'badge--warn'}">${UI.escape(s)}</span>`;
+      };
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Sales Orders Summary</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)} · ${data.count} orders</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>SO No.</th><th>Date</th><th>Customer</th>
+            <th>Due Date</th><th class="num">Total</th><th>Status</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.so_no)}</td><td>${UI.escape(UI.date(r.date))}</td>
+            <td>${UI.escape(r.customer)}</td><td>${r.due_date?UI.escape(UI.date(r.due_date)):""}</td>
+            <td class="num">${UI.money(r.total)}</td><td>${statusBadge(r.status)}</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="6" style="text-align:center;padding:28px">No sales orders in this period.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td colspan="4"><strong>Total (${data.count})</strong></td>
+            <td class="num"><strong>${UI.money(data.grand_total)}</strong></td><td></td></tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  }, "reports-sales-orders");
+});
+
+Router.register("report-open-orders", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  salesReportPage(mount, "Open Orders Summary", (f,t) => salesDateBlock(f,t),
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportOpenOrders", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Open Orders Summary</div>
+          <div class="report-period">${data.count} open orders</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>SO No.</th><th>Date</th><th>Customer</th>
+            <th class="num">Total</th><th class="num">Days Open</th><th>Status</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.so_no)}</td><td>${UI.escape(UI.date(r.date))}</td>
+            <td>${UI.escape(r.customer)}</td><td class="num">${UI.money(r.total)}</td>
+            <td class="num" style="${r.days_open>7?'color:var(--bad)':r.days_open>3?'color:var(--warn)':''}">${r.days_open}</td>
+            <td><span class="badge badge--warn">${UI.escape(r.status)}</span></td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="6" style="text-align:center;padding:28px">No open orders found.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td colspan="3"><strong>Total Open Value</strong></td>
+            <td class="num"><strong>${UI.money(data.grand_total)}</strong></td><td colspan="2"></td></tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  }, "reports-sales-orders");
+});
+
+/* ===================================================================
+   MISC. REPORTS  (v7.10)
+   =================================================================== */
+
+Router.register("reports-misc", (m) => reportCategoryPage(m, "Misc."));
+
+Router.register("report-deleted-transactions", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  salesReportPage(mount, "Deleted Transactions", (f,t) => salesDateBlock(f,t),
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportDeletedTransactions", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Deleted Transactions</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)} · ${data.count} deleted records</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>Type</th><th>Number</th><th>Date</th><th>Party</th>
+            <th class="num">Total</th><th>Deleted By</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td><span class="badge badge--bad">${UI.escape(r.type)}</span></td>
+            <td>${UI.escape(r.number)}</td><td>${UI.escape(UI.date(r.date))}</td>
+            <td>${UI.escape(r.party)}</td><td class="num">${UI.money(r.total)}</td>
+            <td>${UI.escape(r.deleted_by)}</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="6" style="text-align:center;padding:28px">No deleted transactions in this period.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td colspan="4"><strong>Total Value Deleted (${data.count})</strong></td>
+            <td class="num"><strong>${UI.money(data.total_value)}</strong></td><td></td></tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  }, "reports-misc");
+});
+
+Router.register("report-updated-transactions", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  salesReportPage(mount, "Updated Transactions", (f,t) => salesDateBlock(f,t),
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportUpdatedTransactions", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Updated Transactions</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)} · ${data.count} transactions</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>Type</th><th>Number</th><th>Date</th><th>Party</th>
+            <th class="num">Total</th><th>Status</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.type)}</td><td>${UI.escape(r.number)}</td>
+            <td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.party)}</td>
+            <td class="num">${UI.money(r.total)}</td>
+            <td><span class="badge badge--ok">${UI.escape(r.status)}</span></td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="6" style="text-align:center;padding:28px">No transactions in this period.</td></tr>`:""}
+          </tbody>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  }, "reports-misc");
 });

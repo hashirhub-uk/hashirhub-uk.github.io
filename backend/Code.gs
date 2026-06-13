@@ -259,6 +259,12 @@ function handle_(e) {
       case 'reportInvoiceBatchPrint':    return out_({ ok: true, data: reportInvoiceBatchPrint_(p) });
       case 'reportCustomersItemsSales':  return out_({ ok: true, data: reportCustomersItemsSales_(p) });
       case 'invoiceHistory':             return out_({ ok: true, data: invoiceHistory_(p) });
+      case 'reportCustomerDiscounts':    return out_({ ok: true, data: reportCustomerDiscounts_(p) });
+      case 'reportItemDiscounts':        return out_({ ok: true, data: reportItemDiscounts_(p) });
+      case 'reportSalesOrdersSummary':   return out_({ ok: true, data: reportSalesOrdersSummary_(p) });
+      case 'reportOpenOrders':           return out_({ ok: true, data: reportOpenOrders_(p) });
+      case 'reportDeletedTransactions':  return out_({ ok: true, data: reportDeletedTransactions_(p) });
+      case 'reportUpdatedTransactions':  return out_({ ok: true, data: reportUpdatedTransactions_(p) });
       case 'searchDocuments': return out_({ ok: true, data: searchDocs_(p.q) });
       case 'itemCard': return out_({ ok: true, data: itemCard_(p.item_id) });
       case 'updatePrices': return out_({ ok: true, data: updatePrices_(p.updates) });
@@ -2393,4 +2399,163 @@ function invoiceHistory_(p) {
     .slice(0,5)
     .map(function(r){ return { date: r.date, amount: Number(r.amount||0), method: r.method||'', reference: r.reference||'' }; });
   return { invoices: invoices, payments: payments };
+}
+
+// =====================================================================
+//  DISCOUNTS REPORTS  (v7.10)
+// =====================================================================
+
+function reportCustomerDiscounts_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+  var map = {};
+  function addDisc(recs, itemsTable, idField) {
+    recs.filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
+      .forEach(function(r){
+        var cid = String(r.customer_id||'');
+        var cname = (custs[cid]||{}).name || r.customer_name || 'Walk-in';
+        if (!map[cid]) map[cid] = { customer: cname, invoices: 0, discount: 0, total: 0 };
+        // header-level discount
+        map[cid].invoices++;
+        map[cid].discount += Number(r.discount||0);
+        map[cid].total    += Number(r.total||0);
+        // line-level discounts
+        rows_(itemsTable).filter(function(l){ return String(l[idField])===String(r.id); })
+          .forEach(function(l){ map[cid].discount += Number(l.discount||0); });
+      });
+  }
+  addDisc(rows_('Invoices'),      'InvoiceItems',     'invoice_id');
+  addDisc(rows_('SalesReceipts'), 'SalesReceiptItems','receipt_id');
+  var result = Object.values(map).filter(function(r){return r.discount>0;}).sort(function(a,b){return b.discount-a.discount;});
+  return { rows: result, grand_discount: result.reduce(function(s,r){return s+r.discount;},0), grand_total: result.reduce(function(s,r){return s+r.total;},0) };
+}
+
+function reportItemDiscounts_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var cats  = nameMap_('Categories');
+  var brands= nameMap_('Brands');
+  var itemMeta = {}; rows_('Items').forEach(function(it){ itemMeta[String(it.id)] = { name: it.name||'', cat: cats[String(it.category_id||'')] || '', brand: brands[String(it.brand_id||'')] || '' }; });
+  var map = {};
+  function addDisc(recs, itemsTable, idField) {
+    recs.filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
+      .forEach(function(r){
+        rows_(itemsTable).filter(function(l){ return String(l[idField])===String(r.id); })
+          .forEach(function(l){
+            var disc = Number(l.discount||0);
+            if (!disc) return;
+            var id = String(l.item_id||'');
+            var meta = itemMeta[id] || { name: l.description||'Unknown', cat:'', brand:'' };
+            if (!map[id]) map[id] = { name: meta.name, category: meta.cat, brand: meta.brand, qty: 0, discount: 0, total: 0 };
+            map[id].qty      += Number(l.qty||0);
+            map[id].discount += disc;
+            map[id].total    += Number(l.line_total||0);
+          });
+      });
+  }
+  addDisc(rows_('Invoices'),      'InvoiceItems',     'invoice_id');
+  addDisc(rows_('SalesReceipts'), 'SalesReceiptItems','receipt_id');
+  var catFilter   = String(p.category||'');
+  var brandFilter = String(p.brand||'');
+  var result = Object.values(map)
+    .filter(function(r){ return (!catFilter||r.category===cats[catFilter]||true) && r.discount>0; })
+    .sort(function(a,b){return b.discount-a.discount;});
+  return { rows: result, grand_discount: result.reduce(function(s,r){return s+r.discount;},0) };
+}
+
+// =====================================================================
+//  SALES ORDERS REPORTS  (v7.10)
+// =====================================================================
+
+function reportSalesOrdersSummary_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+  var orders = rows_('SalesOrders').filter(function(r){
+    var d=String(r.date||'').slice(0,10);
+    return (!from||d>=from)&&(!to||d<=to) && String(r.status||'')!=='deleted';
+  });
+  var rows = orders.map(function(r){
+    var c = custs[String(r.customer_id||'')] || {};
+    return { so_no: r.so_no||'', date: r.date||'', customer: c.name||'', total: Number(r.total||0), status: r.status||'', due_date: r.due_date||'' };
+  }).sort(function(a,b){ return String(b.date).localeCompare(String(a.date)); });
+  var byStatus = {};
+  rows.forEach(function(r){ byStatus[r.status] = (byStatus[r.status]||0)+1; });
+  return { rows: rows, grand_total: rows.reduce(function(s,r){return s+r.total;},0), count: rows.length, by_status: byStatus };
+}
+
+function reportOpenOrders_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+  var open = ['open','pending','approved','confirmed','processing'];
+  var orders = rows_('SalesOrders').filter(function(r){
+    var d=String(r.date||'').slice(0,10);
+    var s=String(r.status||'').toLowerCase();
+    return (!from||d>=from)&&(!to||d<=to) && open.indexOf(s)>=0;
+  });
+  var rows = orders.map(function(r){
+    var c = custs[String(r.customer_id||'')] || {};
+    var daysOpen = r.date ? Math.floor((new Date()-new Date(r.date))/86400000) : '';
+    return { so_no: r.so_no||'', date: r.date||'', customer: c.name||'', total: Number(r.total||0), status: r.status||'', due_date: r.due_date||'', days_open: daysOpen };
+  }).sort(function(a,b){ return Number(b.days_open||0)-Number(a.days_open||0); });
+  return { rows: rows, grand_total: rows.reduce(function(s,r){return s+r.total;},0), count: rows.length };
+}
+
+// =====================================================================
+//  MISC. REPORTS  (v7.10)
+// =====================================================================
+
+function reportDeletedTransactions_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+  var supps = {}; rows_('Suppliers').forEach(function(s){ supps[String(s.id)] = s.name||''; });
+  var result = [];
+  function scan(table, numField, partyField, partyMap, typeName) {
+    rows_(table).filter(function(r){
+      var d=String(r.date||'').slice(0,10);
+      return String(r.status||'')==='deleted' && (!from||d>=from)&&(!to||d<=to);
+    }).forEach(function(r){
+      result.push({
+        type: typeName, number: r[numField]||'', date: r.date||'',
+        party: (partyMap[String(r[partyField]||'')] || r.customer_name || ''), total: Number(r.total||0), deleted_by: r.created_by||''
+      });
+    });
+  }
+  scan('Invoices',      'invoice_no',  'customer_id', custs, 'Invoice');
+  scan('SalesReceipts', 'receipt_no',  'customer_id', custs, 'Sales Receipt');
+  scan('CreditMemos',   'memo_no',     'customer_id', custs, 'Credit Memo');
+  scan('SalesOrders',   'so_no',       'customer_id', custs, 'Sales Order');
+  scan('Quotations',    'quote_no',    'customer_id', custs, 'Quotation');
+  scan('Bills',         'bill_no',     'supplier_id', supps, 'Bill');
+  scan('PurchaseOrders','po_no',       'supplier_id', supps, 'Purchase Order');
+  scan('Expenses',      'expense_no',  'payee',       {},    'Expense');
+  result.sort(function(a,b){ return String(b.date).localeCompare(String(a.date)); });
+  return { rows: result, count: result.length, total_value: result.reduce(function(s,r){return s+r.total;},0) };
+}
+
+function reportUpdatedTransactions_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+  var supps = {}; rows_('Suppliers').forEach(function(s){ supps[String(s.id)] = s.name||''; });
+  // We surface all non-deleted transactions created in the period as a proxy for updated ones
+  // (our schema tracks created_at; true update_at audit requires a separate log table)
+  var result = [];
+  function scan(table, numField, partyField, partyMap, typeName) {
+    rows_(table).filter(function(r){
+      var d=String(r.date||'').slice(0,10);
+      return String(r.status||'')!=='deleted' && (!from||d>=from)&&(!to||d<=to);
+    }).forEach(function(r){
+      result.push({
+        type: typeName, number: r[numField]||'', date: r.date||'',
+        party: (partyMap[String(r[partyField]||'')] || r.customer_name || ''), total: Number(r.total||0), status: r.status||''
+      });
+    });
+  }
+  scan('Invoices',      'invoice_no',  'customer_id', custs, 'Invoice');
+  scan('SalesReceipts', 'receipt_no',  'customer_id', custs, 'Sales Receipt');
+  scan('CreditMemos',   'memo_no',     'customer_id', custs, 'Credit Memo');
+  scan('SalesOrders',   'so_no',       'customer_id', custs, 'Sales Order');
+  scan('Quotations',    'quote_no',    'customer_id', custs, 'Quotation');
+  scan('Bills',         'bill_no',     'supplier_id', supps, 'Bill');
+  scan('PurchaseOrders','po_no',       'supplier_id', supps, 'Purchase Order');
+  result.sort(function(a,b){ return String(b.date).localeCompare(String(a.date)); });
+  return { rows: result, count: result.length };
 }
