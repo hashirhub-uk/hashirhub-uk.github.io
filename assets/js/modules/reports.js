@@ -35,10 +35,21 @@ const REPORT_TREE = [
     { name: "Stock Status by Vendor",           route: "report-inv-vendor" },
     { name: "Physical Inventory Worksheet",     route: "report-inv-worksheet" }
   ]},
-  { category: "Sales", reports: [
-    { name: "Sales by Items Summary" }, { name: "Sales by Customers Summary" },
-    { name: "Invoices Summary" }, { name: "Invoice Items Summary" },
-    { name: "Sales Orders Summary" }
+  { category: "Purchases", route: "reports-purchases", reports: [
+    { name: "Purchases by Suppliers Summary", route: "report-purchases-suppliers" }
+  ]},
+  { category: "Sales", route: "reports-sales", reports: [
+    { name: "Sales by Category Summary",                       route: "report-sales-category" },
+    { name: "Sales by Items Summary",                          route: "report-sales-items" },
+    { name: "Invoices Summary",                                route: "report-invoices-summary" },
+    { name: "Sales by Customers Summary",                      route: "report-sales-customers" },
+    { name: "Sales By Representative Summary",                 route: "report-sales-rep" },
+    { name: "Return Stock By Representative Summary",          route: "report-return-stock-rep" },
+    { name: "Sales By Salesman Summary",                       route: "report-sales-salesman" },
+    { name: "Financial Recovery and Sales Performance Summary",route: "report-financial-recovery" },
+    { name: "Invoice Items Summary",                           route: "report-invoice-items" },
+    { name: "Invoice Batch Print",                             route: "report-invoice-batch-print" },
+    { name: "Customers Items Sales Summary",                   route: "report-customers-items-sales" }
   ]}
 ];
 
@@ -750,4 +761,511 @@ Router.register("report-inv-worksheet", async (mount) => {
   };
   mount.querySelector("#run-btn").onclick = run;
   run();
+});
+
+/* ===================================================================
+   PURCHASES REPORTS
+   =================================================================== */
+
+Router.register("reports-purchases", (m) => reportCategoryPage(m, "Purchases"));
+
+Router.register("report-purchases-suppliers", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  const def = presetDates("This Month-to-date");
+  mount.innerHTML = `
+    <div class="page-head"><h1>Purchases by Suppliers Summary</h1>
+      <div class="page-actions">
+        <button class="btn" id="back-btn">← Reports</button>
+        <button class="btn no-print" id="print-btn">${UI.icon("printer")} Print</button>
+      </div>
+    </div>
+    <div class="card no-print">
+      <div class="form-grid">
+        <label class="field"><span class="field-label">Date Preset</span>
+          <select id="f-preset">${DATE_PRESETS.map(p=>`<option>${p}</option>`).join("")}</select>
+        </label>
+        <div></div>
+        <label class="field"><span class="field-label">From Date</span><input type="date" id="f-from" value="${def.from}"></label>
+        <label class="field"><span class="field-label">To Date</span><input type="date" id="f-to" value="${def.to}"></label>
+      </div>
+      <div style="margin-top:12px"><button class="btn btn--primary" id="run-btn">View</button></div>
+    </div>
+    <div id="rpt-out"></div>`;
+  mount.querySelector("#back-btn").onclick = () => Router.go("reports-purchases");
+  mount.querySelector("#print-btn").onclick = () => window.print();
+  mount.querySelector("#f-preset").value = "This Month-to-date";
+  mount.querySelector("#f-preset").onchange = function() {
+    if (this.value === "Custom") return;
+    const d = presetDates(this.value);
+    mount.querySelector("#f-from").value = d.from;
+    mount.querySelector("#f-to").value = d.to;
+  };
+  const run = async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value;
+      const to   = mount.querySelector("#f-to").value;
+      const data = await API.call("reportPurchasesBySupplier", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Purchases by Suppliers Summary</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
+        <div class="table-wrap"><table class="data-table report-table">
+          <thead><tr><th>Supplier</th><th class="num">Bills</th><th class="num">POs</th>
+            <th class="num">Total Purchases</th><th class="num">Amount Paid</th><th class="num">Balance</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.supplier)}</td>
+            <td class="num">${r.bills}</td><td class="num">${r.pos}</td>
+            <td class="num">${UI.money(r.total)}</td>
+            <td class="num">${UI.money(r.paid)}</td>
+            <td class="num" style="${r.balance>0?'color:var(--bad)':''}">${UI.money(r.balance)}</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="6" style="text-align:center;padding:28px">No purchase data in this period.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td><strong>Total</strong></td><td></td><td></td>
+            <td class="num"><strong>${UI.money(data.grand_total)}</strong></td>
+            <td class="num"><strong>${UI.money(data.grand_paid)}</strong></td>
+            <td class="num"><strong>${UI.money(data.grand_balance)}</strong></td></tr></tfoot>
+        </table></div></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  };
+  mount.querySelector("#run-btn").onclick = run;
+  run();
+});
+
+/* ===================================================================
+   SALES REPORTS  (11 subtabs)
+   =================================================================== */
+
+Router.register("reports-sales", (m) => reportCategoryPage(m, "Sales"));
+
+// Shared date filter block for sales reports
+function salesDateBlock(defFrom, defTo) {
+  return `
+    <label class="field"><span class="field-label">Date Preset</span>
+      <select id="f-preset">${DATE_PRESETS.map(p=>`<option>${p}</option>`).join("")}</select>
+    </label>
+    <div></div>
+    <label class="field"><span class="field-label">From Date</span><input type="date" id="f-from" value="${defFrom}"></label>
+    <label class="field"><span class="field-label">To Date</span><input type="date" id="f-to" value="${defTo}"></label>`;
+}
+function wireDatePreset(mount) {
+  const el = mount.querySelector("#f-preset");
+  if (!el) return;
+  el.value = "This Month-to-date";
+  el.onchange = function() {
+    if (this.value === "Custom") return;
+    const d = presetDates(this.value);
+    if (mount.querySelector("#f-from")) mount.querySelector("#f-from").value = d.from;
+    if (mount.querySelector("#f-to"))   mount.querySelector("#f-to").value   = d.to;
+  };
+}
+
+// Helper to build a standard sales report page
+function salesReportPage(mount, title, bodyHTML, onRun, backRoute) {
+  const def = presetDates("This Month-to-date");
+  mount.innerHTML = `
+    <div class="page-head"><h1>${UI.escape(title)}</h1>
+      <div class="page-actions">
+        <button class="btn" id="back-btn">← Reports</button>
+        <button class="btn no-print" id="print-btn">${UI.icon("printer")} Print</button>
+      </div>
+    </div>
+    <div class="card no-print">
+      <div class="form-grid">${bodyHTML(def.from, def.to)}</div>
+      <div style="margin-top:12px"><button class="btn btn--primary" id="run-btn">View</button></div>
+    </div>
+    <div id="rpt-out"></div>`;
+  mount.querySelector("#back-btn").onclick = () => Router.go(backRoute || "reports-sales");
+  mount.querySelector("#print-btn").onclick = () => window.print();
+  wireDatePreset(mount);
+  mount.querySelector("#run-btn").onclick = onRun;
+  onRun();
+}
+
+// 1. Sales by Category Summary
+Router.register("report-sales-category", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  salesReportPage(mount, "Sales by Category Summary", (f,t) => salesDateBlock(f,t) + `
+    <label class="field"><span class="field-label">Warehouse</span>
+      <select id="f-wh"><option value="">All Warehouses</option></select></label>`,
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportSalesByCategory", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Sales by Category Summary</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>Category</th><th class="num">Qty Sold</th><th class="num">Total Sales</th><th class="num">%</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.category)}</td><td class="num">${r.qty}</td>
+            <td class="num">${UI.money(r.total)}</td>
+            <td class="num">${data.grand_total?Math.round(r.total/data.grand_total*1000)/10:0}%</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="4" style="text-align:center;padding:28px">No sales data in this period.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td><strong>Total</strong></td><td></td><td class="num"><strong>${UI.money(data.grand_total)}</strong></td><td class="num">100%</td></tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  });
+});
+
+// 2. Sales by Items Summary
+Router.register("report-sales-items", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  salesReportPage(mount, "Sales by Items Summary", (f,t) => salesDateBlock(f,t) + `
+    <label class="field"><span class="field-label">Warehouse</span>
+      <select id="f-wh"><option value="">All Warehouses</option></select></label>`,
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportSalesByItems", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Sales by Items Summary</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>Item</th><th>Category</th><th class="num">Qty Sold</th><th class="num">Total Sales</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.name)}</td><td>${UI.escape(r.category)}</td>
+            <td class="num">${r.qty}</td><td class="num">${UI.money(r.total)}</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="4" style="text-align:center;padding:28px">No sales data in this period.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td colspan="3"><strong>Total</strong></td><td class="num"><strong>${UI.money(data.grand_total)}</strong></td></tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  });
+});
+
+// 3. Invoices Summary
+Router.register("report-invoices-summary", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  let reps = [];
+  try { reps = await API.list("sales-representatives"); } catch(e){}
+  const repOpts = `<option value="">All</option>${reps.map(r=>`<option value="${UI.escape(String(r.id))}">${UI.escape(r.name)}</option>`).join("")}`;
+  salesReportPage(mount, "Invoices Summary", (f,t) => salesDateBlock(f,t) + `
+    <label class="field"><span class="field-label">Sales Representative</span>
+      <select id="f-rep">${repOpts}</select></label>
+    <label class="field"><span class="field-label">Customer Type</span>
+      <select id="f-ctype"><option value="">All</option><option>Local</option><option>Online</option></select></label>`,
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportInvoicesSummary", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Invoices Summary</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div>
+          <div style="color:var(--muted);font-size:12px;margin-top:2px">${data.grand_count} invoices</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>Invoice No.</th><th>Date</th><th>Customer</th>
+            <th class="num">Total</th><th class="num">Paid</th><th class="num">Balance</th><th>Status</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td><a class="link-btn" style="padding:0" onclick="Router.go('invoice-detail?id='+${JSON.stringify(r.id||'')})">${UI.escape(r.invoice_no)}</a></td>
+            <td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.customer)}</td>
+            <td class="num">${UI.money(r.total)}</td><td class="num">${UI.money(r.paid)}</td>
+            <td class="num" style="${r.balance>0?'color:var(--bad)':''}">${UI.money(r.balance)}</td>
+            <td>${Sales&&Sales.statusBadge?Sales.statusBadge(r.status):UI.escape(r.status)}</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="7" style="text-align:center;padding:28px">No invoices in this period.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td colspan="3"><strong>Total (${data.grand_count})</strong></td>
+            <td class="num"><strong>${UI.money(data.grand_total)}</strong></td><td></td><td></td><td></td></tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  });
+});
+
+// 4. Sales by Customers Summary
+Router.register("report-sales-customers", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  let stores = [];
+  try { stores = await API.list("stores"); } catch(e){}
+  const storeOpts = `<option value="">All Stores</option>${stores.map(s=>`<option value="${UI.escape(String(s.id))}">${UI.escape(s.name||s.store_name||'')}</option>`).join("")}`;
+  salesReportPage(mount, "Sales by Customers Summary", (f,t) => salesDateBlock(f,t) + `
+    <label class="field"><span class="field-label">Customer Type</span>
+      <select id="f-ctype"><option value="">All</option><option>Local</option><option>Online</option></select></label>
+    <label class="field"><span class="field-label">Store</span><select id="f-store">${storeOpts}</select></label>`,
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportSalesByCustomers", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Sales by Customers Summary</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>Customer</th><th class="num">Invoices</th><th class="num">Receipts</th>
+            <th class="num">Total Sales</th><th class="num">Paid</th><th class="num">Balance</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.customer)}</td><td class="num">${r.invoices}</td><td class="num">${r.receipts}</td>
+            <td class="num">${UI.money(r.total)}</td><td class="num">${UI.money(r.paid)}</td>
+            <td class="num" style="${r.balance>0?'color:var(--bad)':''}">${UI.money(r.balance)}</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="6" style="text-align:center;padding:28px">No data in this period.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td colspan="3"><strong>Total</strong></td><td class="num"><strong>${UI.money(data.grand_total)}</strong></td><td></td><td></td></tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  });
+});
+
+// 5. Sales By Representative Summary
+Router.register("report-sales-rep", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  salesReportPage(mount, "Sales By Representative Summary", (f,t) => salesDateBlock(f,t),
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportSalesByRep", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Sales By Representative Summary</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>Sales Representative</th><th class="num">Invoice Count</th><th class="num">Total Sales</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.rep)}</td><td class="num">${r.count}</td><td class="num">${UI.money(r.total)}</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="3" style="text-align:center;padding:28px">No data in this period.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td colspan="2"><strong>Total</strong></td><td class="num"><strong>${UI.money(data.grand_total)}</strong></td></tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  });
+});
+
+// 6. Return Stock By Representative Summary
+Router.register("report-return-stock-rep", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  salesReportPage(mount, "Return Stock By Representative Summary", (f,t) => salesDateBlock(f,t),
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportReturnStockByRep", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Return Stock By Representative Summary</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>Sales Representative</th><th class="num">Returns Count</th><th class="num">Total Returned</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.rep)}</td><td class="num">${r.count}</td><td class="num">${UI.money(r.total)}</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="3" style="text-align:center;padding:28px">No return data in this period.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td colspan="2"><strong>Total</strong></td><td class="num"><strong>${UI.money(data.grand_total)}</strong></td></tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  });
+});
+
+// 7. Sales By Salesman Summary
+Router.register("report-sales-salesman", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  salesReportPage(mount, "Sales By Salesman Summary", (f,t) => salesDateBlock(f,t),
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportSalesBySalesman", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Sales By Salesman Summary</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>Salesman</th><th class="num">Invoice Count</th><th class="num">Total Sales</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.rep)}</td><td class="num">${r.count}</td><td class="num">${UI.money(r.total)}</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="3" style="text-align:center;padding:28px">No data in this period.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td colspan="2"><strong>Total</strong></td><td class="num"><strong>${UI.money(data.grand_total)}</strong></td></tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  });
+});
+
+// 8. Financial Recovery and Sales Performance Summary
+Router.register("report-financial-recovery", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  salesReportPage(mount, "Financial Recovery and Sales Performance Summary", (f,t) => salesDateBlock(f,t),
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportFinancialRecovery", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Financial Recovery and Sales Performance Summary</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;margin-top:16px">
+          ${[
+            {label:"Total Invoiced",val:UI.money(data.invoiced),color:"var(--text)"},
+            {label:"Total Collected",val:UI.money(data.collected),color:"var(--ok)"},
+            {label:"Outstanding",val:UI.money(data.outstanding),color:"var(--bad)"},
+            {label:"Recovery Rate",val:data.recovery_rate+"%",color:"var(--accent)"}
+          ].map(k=>`<div class="card" style="padding:18px;text-align:center">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">${UI.escape(k.label)}</div>
+            <div style="font-size:26px;font-weight:700;color:${k.color};font-family:'IBM Plex Mono',monospace">${k.val}</div>
+          </div>`).join("")}
+        </div></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  });
+});
+
+// 9. Invoice Items Summary
+Router.register("report-invoice-items", (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  const pfx = (window.ABS_CONFIG.COMPANY||{}).invoice_prefix || "INV-";
+  mount.innerHTML = `
+    <div class="page-head"><h1>Invoice Items Summary</h1>
+      <div class="page-actions">
+        <button class="btn" id="back-btn">← Reports</button>
+        <button class="btn no-print" id="print-btn">${UI.icon("printer")} Print</button>
+      </div>
+    </div>
+    <div class="card no-print">
+      <div class="form-grid">
+        <label class="field"><span class="field-label">From Invoice No.</span>
+          <input id="f-inv-from" placeholder="${pfx}1"></label>
+        <label class="field"><span class="field-label">To Invoice No.</span>
+          <input id="f-inv-to" placeholder="${pfx}999"></label>
+      </div>
+      <div style="margin-top:12px"><button class="btn btn--primary" id="run-btn">View</button></div>
+    </div>
+    <div id="rpt-out"></div>`;
+  mount.querySelector("#back-btn").onclick = () => Router.go("reports-sales");
+  mount.querySelector("#print-btn").onclick = () => window.print();
+  mount.querySelector("#run-btn").onclick = async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const data = await API.call("reportInvoiceItemsSummary", {
+        inv_from: mount.querySelector("#f-inv-from").value,
+        inv_to:   mount.querySelector("#f-inv-to").value
+      });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Invoice Items Summary</div>
+          <div class="report-period">${data.invoice_count} invoices included</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>Item</th><th class="num">Qty Sold</th><th class="num">Customers</th><th class="num">Total Sales</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.name)}</td><td class="num">${r.qty}</td>
+            <td class="num">${r.cust_count}</td><td class="num">${UI.money(r.total)}</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="4" style="text-align:center;padding:28px">No items found for the given invoice range.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td colspan="3"><strong>Total</strong></td><td class="num"><strong>${UI.money(data.grand_total)}</strong></td></tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  };
+});
+
+// 10. Invoice Batch Print
+Router.register("report-invoice-batch-print", (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  const pfx = (window.ABS_CONFIG.COMPANY||{}).invoice_prefix || "INV-";
+  mount.innerHTML = `
+    <div class="page-head"><h1>Invoices Batch Print</h1>
+      <div class="page-actions">
+        <button class="btn" id="back-btn">← Reports</button>
+        <button class="btn btn--primary no-print" id="print-btn">${UI.icon("printer")} Print All</button>
+      </div>
+    </div>
+    <div class="card no-print">
+      <div class="form-grid">
+        <label class="field"><span class="field-label">From Invoice No.</span>
+          <input id="f-inv-from" placeholder="${pfx}1"></label>
+        <label class="field"><span class="field-label">To Invoice No.</span>
+          <input id="f-inv-to" placeholder="${pfx}999"></label>
+      </div>
+      <div style="margin-top:12px"><button class="btn btn--primary" id="run-btn">Load Invoices</button></div>
+    </div>
+    <div id="rpt-out"></div>`;
+  mount.querySelector("#back-btn").onclick = () => Router.go("reports-sales");
+  mount.querySelector("#print-btn").onclick = () => window.print();
+  mount.querySelector("#run-btn").onclick = async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const invoices = await API.call("reportInvoiceBatchPrint", {
+        inv_from: mount.querySelector("#f-inv-from").value,
+        inv_to:   mount.querySelector("#f-inv-to").value
+      });
+      mount.querySelector("#rpt-out").innerHTML = invoices.map(inv => `
+        <div class="card invoice-doc" style="page-break-after:always;margin-bottom:24px">
+          <div class="inv-top">
+            <div><div class="inv-co-name">${UI.escape((co&&co.name)||"")}</div>
+              <div class="inv-co-meta">${UI.escape((co&&co.address)||"")}</div></div>
+            <div class="inv-title"><h2>INVOICE</h2>
+              <div class="inv-no">${UI.escape(inv.invoice_no)}</div>
+              <div class="inv-date">${UI.escape(UI.date(inv.date))}</div></div>
+          </div>
+          <div class="inv-billto"><div class="inv-label">BILL TO</div>
+            <div class="inv-cust-name">${UI.escape(inv.customer)}</div>
+            ${inv.phone?`<div class="inv-co-meta">${UI.escape(inv.phone)}</div>`:""}
+          </div>
+          <table class="data-table inv-items">
+            <thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Total</th></tr></thead>
+            <tbody>${inv.lines.map(l=>`<tr>
+              <td>${UI.escape(l.description||"")}</td><td class="num">${l.qty}</td>
+              <td class="num">${UI.money(l.unit_price||l.cost)}</td>
+              <td class="num">${UI.money(l.line_total)}</td></tr>`).join("")}</tbody>
+          </table>
+          <div class="inv-totals">
+            <div class="totals-line totals-grand"><span>Total</span><span class="num">${UI.money(inv.total)}</span></div>
+            <div class="totals-line"><span>Paid</span><span class="num">${UI.money(inv.paid)}</span></div>
+            <div class="totals-line" style="color:var(--bad)"><span><strong>Balance Due</strong></span><span class="num"><strong>${UI.money(inv.balance)}</strong></span></div>
+          </div>
+        </div>`).join("") || `<div class="card"><div class="empty"><p>No invoices found in that range.</p></div></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  };
+});
+
+// 11. Customers Items Sales Summary
+Router.register("report-customers-items-sales", async (mount) => {
+  const co = window.ABS_CONFIG.COMPANY || {};
+  salesReportPage(mount, "Customers Items Sales Summary", (f,t) => salesDateBlock(f,t),
+  async () => {
+    UI.loading(true, "Loading…");
+    try {
+      const from = mount.querySelector("#f-from").value, to = mount.querySelector("#f-to").value;
+      const data = await API.call("reportCustomersItemsSales", { from, to });
+      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+        <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+          <div class="report-title">Customers Items Sales Summary</div>
+          <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
+        <table class="data-table report-table">
+          <thead><tr><th>Customer</th><th>Item</th><th class="num">Qty</th><th class="num">Total</th></tr></thead>
+          <tbody>${data.rows.map(r=>`<tr>
+            <td>${UI.escape(r.customer)}</td><td>${UI.escape(r.item)}</td>
+            <td class="num">${r.qty}</td><td class="num">${UI.money(r.total)}</td>
+          </tr>`).join("")}
+          ${!data.rows.length?`<tr><td colspan="4" style="text-align:center;padding:28px">No data in this period.</td></tr>`:""}
+          </tbody>
+          <tfoot><tr><td colspan="3"><strong>Total</strong></td><td class="num"><strong>${UI.money(data.grand_total)}</strong></td></tr></tfoot>
+        </table></div>`;
+    } catch(e) { UI.toast(e.message, "error"); }
+    UI.loading(false);
+  });
 });

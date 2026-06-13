@@ -26,6 +26,7 @@ const CompanySettings = {
       co.theme_color = s.theme_color || '';
       co.font_family = s.font_family || '';
       co.sidebar_color = s.sidebar_color || 'dark';
+      co.sidebar_text_color = s.sidebar_text_color || 'soft-grey';
       this.applyBrand();
       this.applyTheme();
       return s;
@@ -65,6 +66,13 @@ const CompanySettings = {
       root.style.setProperty('--sidebar-border', s.border);
       root.style.setProperty('--sidebar-text', s.text);
     }
+    // apply sidebar text color override
+    const TEXT_COLORS_DEF = [
+      {id:'soft-grey',value:'#cfd9e4'},{id:'white',value:'#ffffff'},{id:'soft-blue',value:'#a8c4e0'},
+      {id:'cream',value:'#f0e8d0'},{id:'mint',value:'#a8d8b8'},{id:'dark',value:'#334155'}
+    ];
+    const tc = TEXT_COLORS_DEF.find(x => x.id === (co.sidebar_text_color || 'soft-grey'));
+    if (tc) root.style.setProperty('--sidebar-text', tc.value);
   }
 };
 
@@ -96,11 +104,21 @@ const SIDEBAR_COLORS = [
   { id: 'light',     name: 'Light',     bg: '#f1f5f9', hover: '#e2e8f0', border: '#cbd5e1', text: '#334155' }
 ];
 
+const SIDEBAR_TEXT_COLORS = [
+  { id: 'soft-grey', name: 'Soft Grey',  value: '#cfd9e4' },
+  { id: 'white',     name: 'White',      value: '#ffffff' },
+  { id: 'soft-blue', name: 'Soft Blue',  value: '#a8c4e0' },
+  { id: 'cream',     name: 'Cream',      value: '#f0e8d0' },
+  { id: 'mint',      name: 'Mint',       value: '#a8d8b8' },
+  { id: 'dark',      name: 'Dark',       value: '#334155' }
+];
+
 Router.register('appearance', (mount) => {
   const co = window.ABS_CONFIG.COMPANY;
   let pickColor  = co.theme_color   || 'teal';
   let pickFont   = co.font_family   || 'system';
   let pickSidebar = co.sidebar_color || 'dark';
+  let pickSidebarText = co.sidebar_text_color || 'soft-grey';
 
   mount.innerHTML = `
     <div class="page-head"><h1>Appearance</h1><span class="page-sub">Customize how the app looks</span>
@@ -118,6 +136,13 @@ Router.register('appearance', (mount) => {
       <p class="muted">Changes the background color of the left navigation bar.</p>
       <div class="swatch-grid" id="ap-sidebar">
         ${SIDEBAR_COLORS.map(s => `<button class="swatch${s.id === pickSidebar ? ' selected' : ''}" data-id="${s.id}" title="${s.name}" style="background:${s.bg};border-color:${s.id === pickSidebar ? '#fff' : 'transparent'}"><span style="color:${s.text}">${UI.escape(s.name)}</span></button>`).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Sidebar text color</h2></div>
+      <p class="muted">Changes the color of menu labels and text in the left navigation bar.</p>
+      <div class="swatch-grid" id="ap-sidebar-text">
+        ${SIDEBAR_TEXT_COLORS.map(s => `<button class="swatch${s.id === pickSidebarText ? ' selected' : ''}" data-id="${s.id}" title="${s.name}" style="background:#1b2431;color:${s.value};border:2px solid ${s.id === pickSidebarText ? '#fff' : 'transparent'};font-weight:600;font-size:12px">${UI.escape(s.name)}</button>`).join('')}
       </div>
     </div>
     <div class="card">
@@ -139,14 +164,17 @@ Router.register('appearance', (mount) => {
       root.style.setProperty('--sidebar-border', s.border);
       root.style.setProperty('--sidebar-text', s.text);
     }
+    const st = SIDEBAR_TEXT_COLORS.find(x => x.id === pickSidebarText);
+    if (st) root.style.setProperty('--sidebar-text', st.value);
   };
   mount.querySelectorAll('#ap-colors .swatch').forEach(b => b.onclick = () => { pickColor = b.dataset.id; mount.querySelectorAll('#ap-colors .swatch').forEach(x => x.classList.toggle('selected', x === b)); live(); });
   mount.querySelectorAll('#ap-sidebar .swatch').forEach(b => b.onclick = () => { pickSidebar = b.dataset.id; mount.querySelectorAll('#ap-sidebar .swatch').forEach(x => x.classList.toggle('selected', x === b)); live(); });
+  mount.querySelectorAll('#ap-sidebar-text .swatch').forEach(b => b.onclick = () => { pickSidebarText = b.dataset.id; mount.querySelectorAll('#ap-sidebar-text .swatch').forEach(x => x.classList.toggle('selected', x === b)); live(); });
   mount.querySelectorAll('#ap-fonts .font-option').forEach(b => b.onclick = () => { pickFont = b.dataset.id; mount.querySelectorAll('#ap-fonts .font-option').forEach(x => x.classList.toggle('selected', x === b)); live(); });
   mount.querySelector('#ap-save').onclick = async () => {
     UI.loading(true, 'Saving…');
     try {
-      await API.call('saveSettings', { data: { theme_color: pickColor, font_family: pickFont, sidebar_color: pickSidebar } });
+      await API.call('saveSettings', { data: { theme_color: pickColor, font_family: pickFont, sidebar_color: pickSidebar, sidebar_text_color: pickSidebarText } });
       await CompanySettings.loadCompany();
       UI.loading(false); UI.toast('Appearance saved.', 'success');
     } catch (e) { UI.loading(false); UI.toast(e.message, 'error'); }

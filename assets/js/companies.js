@@ -10,9 +10,11 @@ window.ABS_COMPANIES = [
   {
     name: "Adil Business Solutions",
     url:  "https://script.google.com/macros/s/AKfycbz7tHSyERDRNsCHr4Jh9Z7T0dW7UpEyDfBNvYkIbZUBNLVbhsYG1TBMaL6Z3iQ3ykhF/exec"
-  },
-  {
-    name: "Trial Client",
-    url:  "https://script.google.com/macros/s/AKfycbzyHzuvywemna2dL8J2rRLr-FTGcIb-vnIult3qADeLbagsF-jZr1O-e81EdYEbuyOf1g/exec"
   }
+
+  // To add a new client, copy the block below and fill in their details:
+  // ,{
+  //   name: "Client Company Name",
+  //   url:  "https://script.google.com/macros/s/THEIR_SCRIPT_ID/exec"
+  // }
 ];

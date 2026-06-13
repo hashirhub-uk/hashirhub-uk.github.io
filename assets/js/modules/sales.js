@@ -530,7 +530,49 @@ async function buildSalesDetail(mount, doc, id) {
         <table class="data-table"><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th class="num">Amount</th></tr></thead>
         <tbody>${payments.map(p => `<tr><td>${UI.escape(UI.date(p.date))}</td><td>${UI.escape(p.method || '')}</td><td>${UI.escape(p.reference || '')}</td><td class="num">${UI.money(p.amount)}</td></tr>`).join('')}</tbody></table>
       </div>` : ''}
+      <div id="inv-history-section"></div>
     </div>`;
+
+  // Load customer history after render
+  if (rec.customer_id) {
+    (async () => {
+      try {
+        const hist = await API.call('invoiceHistory', { customer_id: rec.customer_id, exclude_id: rec.id });
+        const section = mount.querySelector('#inv-history-section');
+        if (!section) return;
+        const invRows = (hist.invoices || []).map(i => `<tr>
+          <td>${UI.escape(i.invoice_no)}</td>
+          <td>${UI.escape(UI.date(i.date))}</td>
+          <td class="num">${UI.money(i.total)}</td>
+          <td class="num" style="${i.balance>0?'color:var(--bad)':''}">${UI.money(i.balance)}</td>
+          <td>${i.status === 'paid' ? '<span class="badge badge--ok">Paid</span>' : i.balance > 0 ? '<span class="badge badge--warn">Open</span>' : '<span class="badge badge--ok">Closed</span>'}</td>
+        </tr>`).join('');
+        const payRows = (hist.payments || []).map(p => `<tr>
+          <td>${UI.escape(UI.date(p.date))}</td>
+          <td class="num">${UI.money(p.amount)}</td>
+          <td>${UI.escape(p.method || '')}</td>
+          <td>${UI.escape(p.reference || '')}</td>
+        </tr>`).join('');
+        section.innerHTML = `
+          <div style="margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:18px">
+            <div>
+              <div class="inv-label" style="margin-bottom:8px">LAST 5 INVOICES</div>
+              <table class="data-table" style="font-size:12.5px">
+                <thead><tr><th>Invoice</th><th>Date</th><th class="num">Total</th><th class="num">Balance</th><th>Status</th></tr></thead>
+                <tbody>${invRows || '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:12px">No previous invoices</td></tr>'}</tbody>
+              </table>
+            </div>
+            <div>
+              <div class="inv-label" style="margin-bottom:8px">LAST 5 PAYMENTS</div>
+              <table class="data-table" style="font-size:12.5px">
+                <thead><tr><th>Date</th><th class="num">Amount</th><th>Method</th><th>Reference</th></tr></thead>
+                <tbody>${payRows || '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:12px">No previous payments</td></tr>'}</tbody>
+              </table>
+            </div>
+          </div>`;
+      } catch(e) { /* silently skip if history fails */ }
+    })();
+  }
 
   mount.querySelector('#back-btn').onclick = () => Router.go(doc.listRoute);
   mount.querySelector('#edit-btn').onclick = () => Router.go(doc.editRoute + '?id=' + rec.id);

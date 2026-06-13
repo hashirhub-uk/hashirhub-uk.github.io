@@ -246,6 +246,19 @@ function handle_(e) {
       case 'reportInventoryMovement':  return out_({ ok: true, data: reportInventoryMovement_(p) });
       case 'reportInventoryVendor':    return out_({ ok: true, data: reportInventoryVendor_(p) });
       case 'reportInventoryWorksheet': return out_({ ok: true, data: reportInventoryWorksheet_(p) });
+      case 'reportPurchasesBySupplier':  return out_({ ok: true, data: reportPurchasesBySupplier_(p) });
+      case 'reportSalesByCategory':      return out_({ ok: true, data: reportSalesByCategory_(p) });
+      case 'reportSalesByItems':         return out_({ ok: true, data: reportSalesByItems_(p) });
+      case 'reportInvoicesSummary':      return out_({ ok: true, data: reportInvoicesSummary_(p) });
+      case 'reportSalesByCustomers':     return out_({ ok: true, data: reportSalesByCustomers_(p) });
+      case 'reportSalesByRep':           return out_({ ok: true, data: reportSalesByRep_(p) });
+      case 'reportReturnStockByRep':     return out_({ ok: true, data: reportReturnStockByRep_(p) });
+      case 'reportSalesBySalesman':      return out_({ ok: true, data: reportSalesBySalesman_(p) });
+      case 'reportFinancialRecovery':    return out_({ ok: true, data: reportFinancialRecovery_(p) });
+      case 'reportInvoiceItemsSummary':  return out_({ ok: true, data: reportInvoiceItemsSummary_(p) });
+      case 'reportInvoiceBatchPrint':    return out_({ ok: true, data: reportInvoiceBatchPrint_(p) });
+      case 'reportCustomersItemsSales':  return out_({ ok: true, data: reportCustomersItemsSales_(p) });
+      case 'invoiceHistory':             return out_({ ok: true, data: invoiceHistory_(p) });
       case 'searchDocuments': return out_({ ok: true, data: searchDocs_(p.q) });
       case 'itemCard': return out_({ ok: true, data: itemCard_(p.item_id) });
       case 'updatePrices': return out_({ ok: true, data: updatePrices_(p.updates) });
@@ -2087,3 +2100,297 @@ function reportInventoryWorksheet_(p) {
 }
 
 function today_() { return new Date().toISOString().slice(0, 10); }
+
+// =====================================================================
+//  ADMIN RESET — run this from Apps Script editor any time
+//  - Sets admin / admin123 as the login credentials
+//  - Works whether the Users sheet is empty or already has rows
+//  - Safe to run multiple times — only updates the admin row
+// =====================================================================
+function resetAdmin() {
+  var sh = sheet_('Users');
+  var rows = sh.getDataRange().getValues();
+  var headers = rows[0];
+  var idCol       = headers.indexOf('id');
+  var userCol     = headers.indexOf('username');
+  var hashCol     = headers.indexOf('password_hash');
+  var nameCol     = headers.indexOf('name');
+  var roleCol     = headers.indexOf('role');
+  var statusCol   = headers.indexOf('status');
+  var createdCol  = headers.indexOf('created_at');
+
+  var newHash = hash_('admin', 'admin123');
+  var now     = new Date().toISOString();
+
+  // Look for existing admin row
+  var adminRow = -1;
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][userCol] || '').toLowerCase() === 'admin') {
+      adminRow = i + 1; // 1-based sheet row
+      break;
+    }
+  }
+
+  if (adminRow > 0) {
+    // Update existing admin row
+    sh.getRange(adminRow, hashCol + 1).setValue(newHash);
+    sh.getRange(adminRow, statusCol + 1).setValue('active');
+    Logger.log('Admin password reset to admin123');
+  } else {
+    // Create fresh admin row
+    var newRow = headers.map(function() { return ''; });
+    newRow[idCol]      = 'usr1';
+    newRow[userCol]    = 'admin';
+    newRow[hashCol]    = newHash;
+    newRow[nameCol]    = 'Administrator';
+    newRow[roleCol]    = 'admin';
+    newRow[statusCol]  = 'active';
+    newRow[createdCol] = now;
+    sh.appendRow(newRow);
+    Logger.log('Admin user created with password admin123');
+  }
+
+  Logger.log('Done. Login with: username=admin  password=admin123');
+}
+
+// =====================================================================
+//  PURCHASES REPORTS  (v7.9)
+// =====================================================================
+
+function reportPurchasesBySupplier_(p) {
+  var from = String(p.from || ''), to = String(p.to || today_());
+  var supps = nameMap_('Suppliers');
+  var bills = rows_('Bills').filter(function(r) {
+    var d = String(r.date || '').slice(0,10);
+    return (!from || d >= from) && (!to || d <= to);
+  });
+  var pos = rows_('PurchaseOrders').filter(function(r) {
+    var d = String(r.date || '').slice(0,10);
+    return (!from || d >= from) && (!to || d <= to);
+  });
+  var map = {};
+  bills.forEach(function(b) {
+    var sid = String(b.supplier_id || '');
+    if (!map[sid]) map[sid] = { supplier: supps[sid] || 'Unknown', bills: 0, pos: 0, total: 0, paid: 0 };
+    map[sid].bills++;
+    map[sid].total += Number(b.total || 0);
+    map[sid].paid  += Number(b.paid  || 0);
+  });
+  pos.forEach(function(po) {
+    var sid = String(po.supplier_id || '');
+    if (!map[sid]) map[sid] = { supplier: supps[sid] || 'Unknown', bills: 0, pos: 0, total: 0, paid: 0 };
+    map[sid].pos++;
+  });
+  var rows = Object.values(map).sort(function(a,b){ return b.total - a.total; });
+  var grand = rows.reduce(function(s,r){ return { total: s.total + r.total, paid: s.paid + r.paid }; }, { total:0, paid:0 });
+  return { rows: rows.map(function(r){ return Object.assign({}, r, { balance: r.total - r.paid }); }), grand_total: grand.total, grand_paid: grand.paid, grand_balance: grand.total - grand.paid };
+}
+
+// =====================================================================
+//  SALES REPORTS  (v7.9)
+// =====================================================================
+
+function reportSalesByCategory_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var cats = nameMap_('Categories');
+  var itemCat = {}; rows_('Items').forEach(function(it){ itemCat[String(it.id)] = String(it.category_id||''); });
+  var map = {};
+  function addLine(lines, date) {
+    var d = String(date||'').slice(0,10);
+    if ((from && d < from) || (to && d > to)) return;
+    (lines||[]).forEach(function(l){
+      var cid = itemCat[String(l.item_id||'')] || '';
+      var name = cats[cid] || 'Uncategorized';
+      if (!map[name]) map[name] = { category: name, qty: 0, total: 0 };
+      map[name].qty   += Number(l.qty||0);
+      map[name].total += Number(l.line_total||0);
+    });
+  }
+  rows_('Invoices').forEach(function(inv){ addLine(rows_('InvoiceItems').filter(function(i){ return String(i.invoice_id)===String(inv.id); }), inv.date); });
+  rows_('SalesReceipts').forEach(function(r){ addLine(rows_('SalesReceiptItems').filter(function(i){ return String(i.receipt_id)===String(r.id); }), r.date); });
+  var result = Object.values(map).sort(function(a,b){ return b.total-a.total; });
+  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0) };
+}
+
+function reportSalesByItems_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var cats = nameMap_('Categories');
+  var itemMeta = {}; rows_('Items').forEach(function(it){ itemMeta[String(it.id)] = { name: it.name||'', cat: cats[String(it.category_id||'')] || '' }; });
+  var map = {};
+  function addLines(lines, date) {
+    var d = String(date||'').slice(0,10);
+    if ((from && d < from)||(to && d > to)) return;
+    (lines||[]).forEach(function(l){
+      var id = String(l.item_id||'');
+      var meta = itemMeta[id] || { name: l.description||'Unknown', cat: '' };
+      if (!map[id]) map[id] = { name: meta.name, category: meta.cat, qty: 0, total: 0 };
+      map[id].qty   += Number(l.qty||0);
+      map[id].total += Number(l.line_total||0);
+    });
+  }
+  rows_('Invoices').forEach(function(inv){ addLines(rows_('InvoiceItems').filter(function(i){ return String(i.invoice_id)===String(inv.id); }), inv.date); });
+  rows_('SalesReceipts').forEach(function(r){ addLines(rows_('SalesReceiptItems').filter(function(i){ return String(i.receipt_id)===String(r.id); }), r.date); });
+  var result = Object.values(map).sort(function(a,b){ return b.total-a.total; });
+  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0) };
+}
+
+function reportInvoicesSummary_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+  var invoices = rows_('Invoices').filter(function(r){
+    var d = String(r.date||'').slice(0,10);
+    return (!from||d>=from) && (!to||d<=to);
+  });
+  var rows = invoices.map(function(inv){
+    var c = custs[String(inv.customer_id||'')] || {};
+    return { invoice_no: inv.invoice_no||'', date: inv.date||'', customer: c.name||'', total: Number(inv.total||0), paid: Number(inv.paid||0), balance: Number(inv.balance||0), status: inv.status||'' };
+  }).sort(function(a,b){ return String(b.date).localeCompare(String(a.date)); });
+  return { rows: rows, grand_total: rows.reduce(function(s,r){return s+r.total;},0), grand_count: rows.length };
+}
+
+function reportSalesByCustomers_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+  var map = {};
+  function add(recs, keyField) {
+    recs.filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
+      .forEach(function(r){
+        var cid = String(r.customer_id||'');
+        var c = custs[cid] || {};
+        if (!map[cid]) map[cid] = { customer: c.name||r.customer_name||'Walk-in', invoices: 0, receipts: 0, total: 0, paid: 0 };
+        map[cid][keyField]++;
+        map[cid].total += Number(r.total||0);
+        map[cid].paid  += Number(r.paid||0);
+      });
+  }
+  add(rows_('Invoices'), 'invoices');
+  add(rows_('SalesReceipts'), 'receipts');
+  var result = Object.values(map).map(function(r){ return Object.assign({},r,{balance:r.total-r.paid}); }).sort(function(a,b){return b.total-a.total;});
+  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0) };
+}
+
+function reportSalesByRep_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var reps = nameMap_('SalesRepresentatives');
+  var map = {};
+  rows_('Invoices').filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
+    .forEach(function(inv){
+      var rid = String(inv.sales_rep||inv.sales_rep_id||'');
+      var name = reps[rid] || (rid ? rid : 'No Rep');
+      if (!map[name]) map[name] = { rep: name, count: 0, total: 0 };
+      map[name].count++; map[name].total += Number(inv.total||0);
+    });
+  var result = Object.values(map).sort(function(a,b){return b.total-a.total;});
+  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0) };
+}
+
+function reportReturnStockByRep_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var reps = nameMap_('SalesRepresentatives');
+  var map = {};
+  rows_('CreditMemos').filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
+    .forEach(function(m){
+      var rid = String(m.sales_rep||m.sales_rep_id||'');
+      var name = reps[rid] || (rid ? rid : 'No Rep');
+      if (!map[name]) map[name] = { rep: name, count: 0, total: 0 };
+      map[name].count++; map[name].total += Number(m.total||0);
+    });
+  var result = Object.values(map).sort(function(a,b){return b.total-a.total;});
+  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0) };
+}
+
+function reportSalesBySalesman_(p) {
+  return reportSalesByRep_(p); // uses same data - sales rep = salesman
+}
+
+function reportFinancialRecovery_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+  var invoiced = 0, collected = 0;
+  rows_('Invoices').filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
+    .forEach(function(r){ invoiced += Number(r.total||0); });
+  rows_('Payments').filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
+    .forEach(function(r){ collected += Number(r.amount||0); });
+  var recovery = invoiced ? (collected/invoiced)*100 : 0;
+  return { invoiced: invoiced, collected: collected, outstanding: invoiced-collected, recovery_rate: Math.round(recovery*10)/10 };
+}
+
+function reportInvoiceItemsSummary_(p) {
+  var from = String(p.inv_from||''), to = String(p.inv_to||'');
+  var itemMeta = {}; rows_('Items').forEach(function(it){ itemMeta[String(it.id)] = it.name||''; });
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c.name||''; });
+  var targetInvs = rows_('Invoices').filter(function(inv){
+    var no = String(inv.invoice_no||'');
+    return (!from || no >= from) && (!to || no <= to);
+  });
+  var map = {};
+  targetInvs.forEach(function(inv){
+    rows_('InvoiceItems').filter(function(i){ return String(i.invoice_id)===String(inv.id); })
+      .forEach(function(l){
+        var id = String(l.item_id||l.description||'');
+        var name = itemMeta[id] || l.description || 'Unknown';
+        if (!map[name]) map[name] = { name: name, qty: 0, total: 0, customers: {} };
+        map[name].qty   += Number(l.qty||0);
+        map[name].total += Number(l.line_total||0);
+        var cid = String(inv.customer_id||'');
+        map[name].customers[cid] = (map[name].customers[cid]||0) + Number(l.line_total||0);
+      });
+  });
+  var result = Object.values(map).map(function(r){ return { name: r.name, qty: r.qty, total: r.total, cust_count: Object.keys(r.customers).length }; }).sort(function(a,b){return b.total-a.total;});
+  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0), invoice_count: targetInvs.length };
+}
+
+function reportInvoiceBatchPrint_(p) {
+  var from = String(p.inv_from||''), to = String(p.inv_to||'');
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+  var invoices = rows_('Invoices').filter(function(inv){
+    var no = String(inv.invoice_no||'');
+    return (!from || no >= from) && (!to || no <= to);
+  });
+  return invoices.map(function(inv){
+    var c = custs[String(inv.customer_id||'')] || {};
+    var lines = rows_('InvoiceItems').filter(function(i){ return String(i.invoice_id)===String(inv.id); });
+    return { invoice_no: inv.invoice_no, date: inv.date, customer: c.name||'', address: c.address||'', phone: c.phone||'', total: Number(inv.total||0), paid: Number(inv.paid||0), balance: Number(inv.balance||0), status: inv.status||'', lines: lines };
+  });
+}
+
+function reportCustomersItemsSales_(p) {
+  var from = String(p.from||''), to = String(p.to||today_());
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+  var itemMeta = {}; rows_('Items').forEach(function(it){ itemMeta[String(it.id)] = it.name||''; });
+  var map = {};
+  rows_('Invoices').filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
+    .forEach(function(inv){
+      var cid = String(inv.customer_id||'');
+      var cname = (custs[cid]||{}).name || 'Unknown';
+      rows_('InvoiceItems').filter(function(i){ return String(i.invoice_id)===String(inv.id); })
+        .forEach(function(l){
+          var key = cid + '|' + String(l.item_id||'');
+          if (!map[key]) map[key] = { customer: cname, item: itemMeta[String(l.item_id||'')] || l.description||'', qty: 0, total: 0 };
+          map[key].qty   += Number(l.qty||0);
+          map[key].total += Number(l.line_total||0);
+        });
+    });
+  var result = Object.values(map).sort(function(a,b){ return String(a.customer).localeCompare(String(b.customer)) || b.total-a.total; });
+  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0) };
+}
+
+// =====================================================================
+//  INVOICE HISTORY  (last 5 invoices + last 5 payments for customer)
+// =====================================================================
+function invoiceHistory_(p) {
+  var custId = String(p.customer_id||'');
+  var excludeId = String(p.exclude_id||'');
+  if (!custId) return { invoices: [], payments: [] };
+  var invoices = rows_('Invoices')
+    .filter(function(r){ return String(r.customer_id)===custId && String(r.id)!==excludeId; })
+    .sort(function(a,b){ return String(b.date||'').localeCompare(String(a.date||'')); })
+    .slice(0,5)
+    .map(function(r){ return { invoice_no: r.invoice_no, date: r.date, total: Number(r.total||0), paid: Number(r.paid||0), balance: Number(r.balance||0), status: r.status||'' }; });
+  var payments = rows_('Payments')
+    .filter(function(r){ return String(r.customer_id)===custId; })
+    .sort(function(a,b){ return String(b.date||'').localeCompare(String(a.date||'')); })
+    .slice(0,5)
+    .map(function(r){ return { date: r.date, amount: Number(r.amount||0), method: r.method||'', reference: r.reference||'' }; });
+  return { invoices: invoices, payments: payments };
+}
