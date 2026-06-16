@@ -1,7 +1,6 @@
 /* =====================================================================
    Adil Business Solutions — Hash router
    #route?key=value  ->  registered handler(container, params)
-   Routes not yet built show a "planned for a later phase" placeholder.
    ===================================================================== */
 
 const Router = {
@@ -65,9 +64,7 @@ const Router = {
       <div class="page-head"><h1>${UI.escape(label)}</h1></div>
       <div class="card"><div class="empty">
         ${UI.icon("layers")}
-        <h3>Coming in a later phase</h3>
-        <p>The <strong>${UI.escape(label)}</strong> screen is on the roadmap. Phase 0 sets up the
-        shell, login and backend connection — modules are added phase by phase.</p>
+        <h3>Coming soon</h3>
       </div></div>`;
   },
 

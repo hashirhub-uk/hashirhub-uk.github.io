@@ -140,7 +140,7 @@ function migrate() {
       sh.getRange(1, have.length + 1, 1, missing.length).setFontWeight('bold');
     }
   });
-  // ensure counters exist with the right prefixes (matches Diyar numbering)
+  // ensure counters exist with the right prefixes
   upsertCounter_('invoice', 'INV-1-');
   upsertCounter_('sales_receipt', 'SAL-1-');
   upsertCounter_('quotation', 'QUO-1-');
@@ -600,7 +600,7 @@ function searchDocs_(q) {
   return res.slice(0, 25);
 }
 
-// numeric UPC/barcode generator, Diyar-style (1000001, 1000002, …)
+// numeric UPC/barcode generator (1000001, 1000002, …)
 function nextUpc_() {
   var sh = sheet_('Counters');
   var values = sh.getDataRange().getValues();
@@ -1671,8 +1671,6 @@ function dashboardExtra_() {
 // =====================================================================
 //  REPORTS — Company & Financial
 // =====================================================================
-var RPT_ASSET = ['Bank', 'Other Current Asset', 'Accounts Receivable', 'Fixed Asset', 'Other Asset'];
-var RPT_LIAB = ['Accounts Payable', 'Other Current Liability', 'Long Term Liability', 'Other Liability', 'Credit Card'];
 var RPT_INCOME = ['Income', 'Other Income'];
 var RPT_EXPENSE = ['Expense', 'Other Expense'];
 var RPT_COGS = ['Cost of Goods Sold'];
@@ -1728,16 +1726,32 @@ function plData_(from, to) {
   return { from: f, to: t, income: income, cogs: cogs, gross_profit: gross, expense: expense, net_income: gross - expense.total };
 }
 
+var RPT_ASSET_CURRENT = ['Bank', 'Other Current Asset', 'Accounts Receivable'];
+var RPT_ASSET_FIXED = ['Fixed Asset'];
+var RPT_ASSET_OTHER = ['Other Asset'];
+var RPT_LIAB_CURRENT = ['Accounts Payable', 'Other Current Liability', 'Credit Card'];
+var RPT_LIAB_LONGTERM = ['Long Term Liability', 'Other Liability'];
+
 function reportBalanceSheet_(p) {
   var asOf = p.to ? dayKey_(p.to) : null;
   var bal = balancesByAccount_(null, asOf);
-  var assets = rptSection_(bal, RPT_ASSET, 'debit');
-  var liab = rptSection_(bal, RPT_LIAB, 'credit');
-  var equity = rptSection_(bal, ['Equity'], 'credit');
+  var currentAssets = rptSection_(bal, RPT_ASSET_CURRENT, 'debit');
+  var fixedAssets   = rptSection_(bal, RPT_ASSET_FIXED, 'debit');
+  var otherAssets   = rptSection_(bal, RPT_ASSET_OTHER, 'debit');
+  var currentLiab   = rptSection_(bal, RPT_LIAB_CURRENT, 'credit');
+  var longtermLiab  = rptSection_(bal, RPT_LIAB_LONGTERM, 'credit');
+  var equity        = rptSection_(bal, ['Equity'], 'credit');
   var pl = plData_(null, asOf);
   equity.lines.push({ account: 'Current Year Earnings', amount: pl.net_income });
   equity.total += pl.net_income;
-  return { as_of: asOf, assets: assets, liabilities: liab, equity: equity, total_assets: assets.total, total_liab_equity: liab.total + equity.total };
+  var totalAssets = currentAssets.total + fixedAssets.total + otherAssets.total;
+  var totalLiabEquity = currentLiab.total + longtermLiab.total + equity.total;
+  return {
+    as_of: asOf,
+    current_assets: currentAssets, fixed_assets: fixedAssets, other_assets: otherAssets,
+    current_liab: currentLiab, longterm_liab: longtermLiab, equity: equity,
+    total_assets: totalAssets, total_liab_equity: totalLiabEquity
+  };
 }
 
 function reportIncomeByCustomer_(p) {
@@ -1778,7 +1792,10 @@ function reportTransactionsSummary_(p) {
     ['Expenses', 'Expenses', null, null],
     ['Customer Payments', 'Payments', 'amount', null]
   ];
-  return { from: f, to: t, rows: defs.map(function (d) { var r = agg(d[1], d[2], d[3]); return { label: d[0], count: r.count, total: r.total }; }) };
+  var rows = defs.map(function (d) { var r = agg(d[1], d[2], d[3]); return { label: d[0], count: r.count, total: r.total }; });
+  return { from: f, to: t, rows: rows,
+    grand_count: rows.reduce(function(s,r){return s+r.count;},0),
+    grand_total: rows.reduce(function(s,r){return s+r.total;},0) };
 }
 
 // =====================================================================
@@ -1827,13 +1844,14 @@ function statement_(events, f, t, openingExtra) {
 }
 
 function reportCustomerStatement_(p) {
-  if (!p.id) return { lines: [], need_pick: true };
+  var custId = p.id || p.customer_id;
+  if (!custId) return { lines: [], need_pick: true };
   var f = p.from ? dayKey_(p.from) : null, t = p.to ? dayKey_(p.to) : null;
-  var c = get_('Customers', p.id); if (!c) throw new Error('Customer not found.');
+  var c = get_('Customers', custId); if (!c) throw new Error('Customer not found.');
   var ev = [];
-  list_('Invoices', {}).forEach(function (r) { if (String(r.customer_id) === String(p.id)) ev.push({ date: dayKey_(r.date), type: 'Invoice', number: r.invoice_no, debit: Number(r.total || 0), credit: 0 }); });
-  list_('Payments', {}).forEach(function (r) { if (String(r.customer_id) === String(p.id)) ev.push({ date: dayKey_(r.date), type: 'Payment', number: r.reference || '', debit: 0, credit: Number(r.amount || 0) }); });
-  list_('CreditMemos', {}).forEach(function (r) { if (String(r.customer_id) === String(p.id)) ev.push({ date: dayKey_(r.date), type: 'Credit Memo', number: r.memo_no, debit: 0, credit: Number(r.total || 0) }); });
+  list_('Invoices', {}).forEach(function (r) { if (String(r.customer_id) === String(custId)) ev.push({ date: dayKey_(r.date), type: 'Invoice', number: r.invoice_no, debit: Number(r.total || 0), credit: 0 }); });
+  list_('Payments', {}).forEach(function (r) { if (String(r.customer_id) === String(custId)) ev.push({ date: dayKey_(r.date), type: 'Payment', number: r.reference || '', debit: 0, credit: Number(r.amount || 0) }); });
+  list_('CreditMemos', {}).forEach(function (r) { if (String(r.customer_id) === String(custId)) ev.push({ date: dayKey_(r.date), type: 'Credit Memo', number: r.memo_no, debit: 0, credit: Number(r.total || 0) }); });
   var s = statement_(ev, f, t, Number(c.opening_balance || 0));
   return { name: c.name, from: f, to: t, opening: s.opening, lines: s.lines, closing: s.closing };
 }
@@ -1856,18 +1874,33 @@ function reportSupplierBalances_(p) {
 }
 
 function reportSupplierStatement_(p) {
-  if (!p.id) return { lines: [], need_pick: true };
+  var suppId = p.id || p.supplier_id;
+  if (!suppId) return { lines: [], need_pick: true };
   var f = p.from ? dayKey_(p.from) : null, t = p.to ? dayKey_(p.to) : null;
-  var s = get_('Suppliers', p.id); if (!s) throw new Error('Supplier not found.');
+  var s = get_('Suppliers', suppId); if (!s) throw new Error('Supplier not found.');
   var ev = [];
   list_('Bills', {}).forEach(function (r) {
-    if (String(r.supplier_id) !== String(p.id)) return;
+    if (String(r.supplier_id) !== String(suppId)) return;
     if (r.bill_type === 'Credit') ev.push({ date: dayKey_(r.date), type: 'Supplier Credit', number: r.bill_no, debit: Number(r.total || 0), credit: 0 });
     else ev.push({ date: dayKey_(r.date), type: 'Bill', number: r.bill_no, debit: 0, credit: Number(r.total || 0) });
   });
   var st = statement_(ev, f, t, Number(s.opening_balance || 0) * -1);
   // balance is credit-heavy (we owe); flip sign so positive = payable
   return { name: s.name, from: f, to: t, opening: -st.opening, lines: st.lines.map(function (l) { return { date: l.date, type: l.type, number: l.number, debit: l.debit, credit: l.credit, balance: -l.balance }; }), closing: -st.closing };
+}
+
+function reportAccountStatement_(p) {
+  var acctId = p.id || p.account_id;
+  if (!acctId) return { lines: [], need_pick: true };
+  var f = p.from ? dayKey_(p.from) : null, t = p.to ? dayKey_(p.to) : null;
+  var acct = get_('Accounts', acctId); if (!acct) throw new Error('Account not found.');
+  var ev = [];
+  rows_('Journal').forEach(function (r) {
+    if (String(r.account_id) !== String(acctId)) return;
+    ev.push({ date: dayKey_(r.date), description: r.memo || r.name || '', debit: Number(r.debit || 0), credit: Number(r.credit || 0) });
+  });
+  var s = statement_(ev, f, t, 0);
+  return { name: acct.account_name, type: acct.account_type, from: f, to: t, opening: s.opening, lines: s.lines, closing: s.closing };
 }
 
 function reportJournal_(p) {
@@ -1886,12 +1919,14 @@ function reportJournal_(p) {
 
 function reportGeneralLedger_(p) {
   var f = p.from ? dayKey_(p.from) : null, t = p.to ? dayKey_(p.to) : null;
+  var acctFilter = p.account_id || p.id || '';
   var byAcct = {};
   rows_('Journal').forEach(function (r) {
     var a = String(r.account_id); (byAcct[a] = byAcct[a] || []).push(r);
   });
   var out = [];
   rows_('Accounts').forEach(function (a) {
+    if (acctFilter && String(a.id) !== String(acctFilter)) return;
     var entries = byAcct[String(a.id)] || []; if (!entries.length) return;
     var ev = entries.map(function (r) { return { date: dayKey_(r.date), number: r.entry_no, memo: r.memo || r.name || '', debit: Number(r.debit || 0), credit: Number(r.credit || 0) }; });
     var s = statement_(ev, f, t, 0);

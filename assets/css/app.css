@@ -380,6 +380,15 @@ code { font-family: "IBM Plex Mono", monospace; background: #eef1f5; padding: 1p
 .brand-mark--img { padding: 0; overflow: hidden; }
 .brand-mark--img .brand-logo { width: 100%; height: 100%; object-fit: contain; display: block; }
 
+/* --- Hashir Hub platform logo --- */
+.brand--logo { justify-content: center; }
+.brand-lockup { max-width: 260px; width: 100%; height: auto; display: block; }
+.brand--lg.brand--logo { padding: 4px 0 4px; }
+.sidebar .brand-mark--img {
+  background: #ffffff; padding: 5px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.15);
+}
+
 /* --- global search in topbar --- */
 .topbar-search { position: relative; flex: 1 1 auto; max-width: 520px; margin: 0 16px; }
 .topbar-search input { width: 100%; padding: 9px 14px; border: 1px solid var(--border, #d8dee4); border-radius: 8px; background: var(--surface, #fff); font-size: 14px; }

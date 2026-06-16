@@ -151,6 +151,7 @@ function reportScreen(mount, cfg) {
     if (isRange) { mount.querySelector("#rpt-from").value = d.from; mount.querySelector("#rpt-to").value = d.to; }
     else { mount.querySelector("#rpt-asof").value = d.to; }
   };
+  if (cfg.init) { cfg.init(mount).catch(e => UI.toast(e.message, "error")); }
 
   async function run() {
     if (isRange) { from = mount.querySelector("#rpt-from").value; to = mount.querySelector("#rpt-to").value; }
@@ -175,10 +176,10 @@ function reportScreen(mount, cfg) {
 Router.register("report-pl", (m) => reportScreen(m, {
   title: "Profit and Loss Standard", action: "reportProfitLoss", mode: "range",
   render(data, {from, to, co}) {
-    const section = (label, rows, cls) => rows.length ? `
+    const section = (label, sec) => sec && sec.lines && sec.lines.length ? `
       <tr class="rpt-section"><td colspan="2">${UI.escape(label)}</td></tr>
-      ${rows.map(r=>`<tr><td style="padding-left:28px">${UI.escape(r.name)}</td><td class="num">${UI.money(r.balance)}</td></tr>`).join("")}
-      <tr class="rpt-subtotal"><td>Total ${UI.escape(label)}</td><td class="num">${UI.money(rows.reduce((s,r)=>s+r.balance,0))}</td></tr>` : "";
+      ${sec.lines.map(r=>`<tr><td style="padding-left:28px">${UI.escape(r.account)}</td><td class="num">${UI.money(r.amount)}</td></tr>`).join("")}
+      <tr class="rpt-subtotal"><td>Total ${UI.escape(label)}</td><td class="num">${UI.money(sec.total)}</td></tr>` : "";
     return `<div class="card report-doc no-print-card">
       <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
         <div class="report-title">Profit and Loss Standard</div>
@@ -186,11 +187,11 @@ Router.register("report-pl", (m) => reportScreen(m, {
       <table class="data-table report-table" style="max-width:520px;margin:auto">
         <thead><tr><th>Account</th><th class="num">Amount</th></tr></thead>
         <tbody>
-          ${section("Income", data.income||[])}
-          ${section("Cost of Goods Sold", data.cogs||[])}
-          ${data.gross!==undefined?`<tr class="rpt-total"><td><strong>Gross Profit</strong></td><td class="num"><strong>${UI.money(data.gross)}</strong></td></tr>`:""}
-          ${section("Expenses", data.expenses||[])}
-          <tr class="rpt-grand"><td><strong>Net Income</strong></td><td class="num"><strong>${UI.money(data.net||0)}</strong></td></tr>
+          ${section("Income", data.income)}
+          ${section("Cost of Goods Sold", data.cogs)}
+          <tr class="rpt-total"><td><strong>Gross Profit</strong></td><td class="num"><strong>${UI.money(data.gross_profit||0)}</strong></td></tr>
+          ${section("Expenses", data.expense)}
+          <tr class="rpt-grand"><td><strong>Net Income</strong></td><td class="num"><strong>${UI.money(data.net_income||0)}</strong></td></tr>
         </tbody>
       </table></div>`;
   }
@@ -199,10 +200,10 @@ Router.register("report-pl", (m) => reportScreen(m, {
 Router.register("report-balance-sheet", (m) => reportScreen(m, {
   title: "Balance Sheet Standard", action: "reportBalanceSheet", mode: "asof",
   render(data, {to, co}) {
-    const section = (label, rows) => rows&&rows.length ? `
+    const section = (label, sec) => sec && sec.lines && sec.lines.length ? `
       <tr class="rpt-section"><td colspan="2">${UI.escape(label)}</td></tr>
-      ${rows.map(r=>`<tr><td style="padding-left:28px">${UI.escape(r.name)}</td><td class="num">${UI.money(r.balance)}</td></tr>`).join("")}
-      <tr class="rpt-subtotal"><td>Total ${UI.escape(label)}</td><td class="num">${UI.money(rows.reduce((s,r)=>s+r.balance,0))}</td></tr>` : "";
+      ${sec.lines.map(r=>`<tr><td style="padding-left:28px">${UI.escape(r.account)}</td><td class="num">${UI.money(r.amount)}</td></tr>`).join("")}
+      <tr class="rpt-subtotal"><td>Total ${UI.escape(label)}</td><td class="num">${UI.money(sec.total)}</td></tr>` : "";
     return `<div class="card report-doc no-print-card">
       <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
         <div class="report-title">Balance Sheet</div><div class="report-period">As of ${UI.date(to)}</div></div>
@@ -214,11 +215,11 @@ Router.register("report-balance-sheet", (m) => reportScreen(m, {
           ${section("Fixed Assets", data.fixed_assets)}
           ${section("Other Assets", data.other_assets)}
           <tr class="rpt-total"><td><strong>Total Assets</strong></td><td class="num"><strong>${UI.money(data.total_assets||0)}</strong></td></tr>
-          <tr class="rpt-section"><td colspan="2"><strong>Liabilities & Equity</strong></td></tr>
+          <tr class="rpt-section"><td colspan="2"><strong>Liabilities &amp; Equity</strong></td></tr>
           ${section("Current Liabilities", data.current_liab)}
           ${section("Long-term Liabilities", data.longterm_liab)}
           ${section("Equity", data.equity)}
-          <tr class="rpt-grand"><td><strong>Total Liabilities & Equity</strong></td><td class="num"><strong>${UI.money(data.total_liab_equity||0)}</strong></td></tr>
+          <tr class="rpt-grand"><td><strong>Total Liabilities &amp; Equity</strong></td><td class="num"><strong>${UI.money(data.total_liab_equity||0)}</strong></td></tr>
         </tbody>
       </table></div>`;
   }
@@ -233,8 +234,9 @@ Router.register("report-trial-balance", (m) => reportScreen(m, {
       <table class="data-table report-table">
         <thead><tr><th>Account</th><th>Type</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
         <tbody>
-          ${(data.rows||[]).map(r=>`<tr><td>${UI.escape(r.name)}</td><td>${UI.escape(r.type)}</td>
+          ${(data.lines||[]).map(r=>`<tr><td>${UI.escape(r.account)}</td><td>${UI.escape(r.type)}</td>
             <td class="num">${r.debit?UI.money(r.debit):""}</td><td class="num">${r.credit?UI.money(r.credit):""}</td></tr>`).join("")}
+          ${!(data.lines||[]).length?`<tr><td colspan="4" style="text-align:center;padding:28px">No account activity found.</td></tr>`:""}
           <tr class="rpt-grand"><td colspan="2"><strong>Total</strong></td>
             <td class="num"><strong>${UI.money(data.total_debit||0)}</strong></td>
             <td class="num"><strong>${UI.money(data.total_credit||0)}</strong></td></tr>
@@ -253,8 +255,9 @@ Router.register("report-income-customer", (m) => reportScreen(m, {
       <table class="data-table report-table">
         <thead><tr><th>Customer</th><th class="num">Amount</th></tr></thead>
         <tbody>
-          ${(data.rows||[]).map(r=>`<tr><td>${UI.escape(r.customer)}</td><td class="num">${UI.money(r.total)}</td></tr>`).join("")}
-          <tr class="rpt-grand"><td><strong>Total</strong></td><td class="num"><strong>${UI.money(data.grand_total||0)}</strong></td></tr>
+          ${(data.lines||[]).map(r=>`<tr><td>${UI.escape(r.customer)}</td><td class="num">${UI.money(r.amount)}</td></tr>`).join("")}
+          ${!(data.lines||[]).length?`<tr><td colspan="2" style="text-align:center;padding:28px">No income in this period.</td></tr>`:""}
+          <tr class="rpt-grand"><td><strong>Total</strong></td><td class="num"><strong>${UI.money(data.total||0)}</strong></td></tr>
         </tbody>
       </table></div>`;
   }
@@ -270,7 +273,7 @@ Router.register("report-transactions-summary", (m) => reportScreen(m, {
       <table class="data-table report-table">
         <thead><tr><th>Transaction Type</th><th class="num">Count</th><th class="num">Total</th></tr></thead>
         <tbody>
-          ${(data.rows||[]).map(r=>`<tr><td>${UI.escape(r.type)}</td><td class="num">${r.count}</td><td class="num">${UI.money(r.total)}</td></tr>`).join("")}
+          ${(data.rows||[]).map(r=>`<tr><td>${UI.escape(r.label)}</td><td class="num">${r.count}</td><td class="num">${UI.money(r.total)}</td></tr>`).join("")}
           <tr class="rpt-grand"><td><strong>Total</strong></td><td class="num"><strong>${data.grand_count||0}</strong></td>
             <td class="num"><strong>${UI.money(data.grand_total||0)}</strong></td></tr>
         </tbody>
@@ -290,8 +293,9 @@ Router.register("report-customer-balances", (m) => reportScreen(m, {
       <table class="data-table report-table">
         <thead><tr><th>Customer</th><th class="num">Invoiced</th><th class="num">Paid</th><th class="num">Balance</th></tr></thead>
         <tbody>
-          ${(data.rows||[]).map(r=>`<tr><td>${UI.escape(r.customer)}</td><td class="num">${UI.money(r.invoiced)}</td>
+          ${(data.lines||[]).map(r=>`<tr><td>${UI.escape(r.customer)}</td><td class="num">${UI.money(r.invoiced)}</td>
             <td class="num">${UI.money(r.paid)}</td><td class="num">${UI.money(r.balance)}</td></tr>`).join("")}
+          ${!(data.lines||[]).length?`<tr><td colspan="4" style="text-align:center;padding:28px">No customer balances found.</td></tr>`:""}
           <tr class="rpt-grand"><td><strong>Total</strong></td><td class="num"><strong>${UI.money(data.total_invoiced||0)}</strong></td>
             <td class="num"><strong>${UI.money(data.total_paid||0)}</strong></td>
             <td class="num"><strong>${UI.money(data.total_balance||0)}</strong></td></tr>
@@ -310,9 +314,10 @@ Router.register("report-payment-collection", (m) => reportScreen(m, {
       <table class="data-table report-table">
         <thead><tr><th>Date</th><th>Customer</th><th>Method</th><th class="num">Amount</th></tr></thead>
         <tbody>
-          ${(data.rows||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.customer)}</td>
+          ${(data.lines||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.customer)}</td>
             <td>${UI.escape(r.method||"")}</td><td class="num">${UI.money(r.amount)}</td></tr>`).join("")}
-          <tr class="rpt-grand"><td colspan="3"><strong>Total</strong></td><td class="num"><strong>${UI.money(data.grand_total||0)}</strong></td></tr>
+          ${!(data.lines||[]).length?`<tr><td colspan="4" style="text-align:center;padding:28px">No payments in this period.</td></tr>`:""}
+          <tr class="rpt-grand"><td colspan="3"><strong>Total</strong></td><td class="num"><strong>${UI.money(data.total||0)}</strong></td></tr>
         </tbody>
       </table></div>`;
   }
@@ -321,7 +326,7 @@ Router.register("report-payment-collection", (m) => reportScreen(m, {
 Router.register("report-customer-statement", (m) => reportScreen(m, {
   title: "Customer Statement", action: "reportCustomerStatement", mode: "range",
   extraFilters: `<label class="field"><span class="field-label">Customer</span>
-    <select id="rpt-customer"><option value="">All Customers</option></select></label>`,
+    <select id="rpt-customer"><option value="">Select a customer…</option></select></label>`,
   gatherExtra(mount) { return { customer_id: mount.querySelector("#rpt-customer").value }; },
   async init(mount) {
     const custs = await API.list("customers");
@@ -329,15 +334,22 @@ Router.register("report-customer-statement", (m) => reportScreen(m, {
     custs.forEach(c => sel.add(new Option(c.name, c.id)));
   },
   render(data, {from, to, co}) {
+    if (data.need_pick) {
+      return `<div class="card"><div class="empty"><p>Select a customer above and click View to see their statement.</p></div></div>`;
+    }
     return `<div class="card report-doc no-print-card">
       <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
-        <div class="report-title">Customer Statement</div>
+        <div class="report-title">Customer Statement — ${UI.escape(data.name||"")}</div>
         <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
       <table class="data-table report-table">
         <thead><tr><th>Date</th><th>Type</th><th>Number</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
-        <tbody>${(data.rows||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.type)}</td>
+        <tbody>
+          <tr class="rpt-subtotal"><td colspan="5">Opening Balance</td><td class="num">${UI.money(data.opening||0)}</td></tr>
+          ${(data.lines||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.type)}</td>
           <td>${UI.escape(r.number||"")}</td><td class="num">${r.debit?UI.money(r.debit):""}</td>
           <td class="num">${r.credit?UI.money(r.credit):""}</td><td class="num">${UI.money(r.balance)}</td></tr>`).join("")}
+          ${!(data.lines||[]).length?`<tr><td colspan="6" style="text-align:center;padding:20px">No activity in this period.</td></tr>`:""}
+          <tr class="rpt-grand"><td colspan="5"><strong>Closing Balance</strong></td><td class="num"><strong>${UI.money(data.closing||0)}</strong></td></tr>
         </tbody>
       </table></div>`;
   }
@@ -346,19 +358,31 @@ Router.register("report-customer-statement", (m) => reportScreen(m, {
 Router.register("report-account-statement", (m) => reportScreen(m, {
   title: "Account Statement", action: "reportAccountStatement", mode: "range",
   extraFilters: `<label class="field"><span class="field-label">Account</span>
-    <select id="rpt-account"><option value="">All Accounts</option></select></label>`,
+    <select id="rpt-account"><option value="">Select an account…</option></select></label>`,
   gatherExtra(mount) { return { account_id: mount.querySelector("#rpt-account").value }; },
+  async init(mount) {
+    const accts = await API.list("accounts");
+    const sel = mount.querySelector("#rpt-account");
+    accts.forEach(a => sel.add(new Option(a.account_name, a.id)));
+  },
   render(data, {from, to, co}) {
+    if (data.need_pick) {
+      return `<div class="card"><div class="empty"><p>Select an account above and click View to see its statement.</p></div></div>`;
+    }
     return `<div class="card report-doc no-print-card">
       <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
-        <div class="report-title">Account Statement</div>
+        <div class="report-title">Account Statement — ${UI.escape(data.name||"")}</div>
         <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
       <table class="data-table report-table">
         <thead><tr><th>Date</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
-        <tbody>${(data.rows||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.description||"")}</td>
+        <tbody>
+          <tr class="rpt-subtotal"><td colspan="4">Opening Balance</td><td class="num">${UI.money(data.opening||0)}</td></tr>
+          ${(data.lines||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.description||"")}</td>
           <td class="num">${r.debit?UI.money(r.debit):""}</td>
           <td class="num">${r.credit?UI.money(r.credit):""}</td>
           <td class="num">${UI.money(r.balance)}</td></tr>`).join("")}
+          ${!(data.lines||[]).length?`<tr><td colspan="5" style="text-align:center;padding:20px">No activity in this period.</td></tr>`:""}
+          <tr class="rpt-grand"><td colspan="4"><strong>Closing Balance</strong></td><td class="num"><strong>${UI.money(data.closing||0)}</strong></td></tr>
         </tbody>
       </table></div>`;
   }
@@ -376,8 +400,9 @@ Router.register("report-supplier-balances", (m) => reportScreen(m, {
       <table class="data-table report-table">
         <thead><tr><th>Supplier</th><th class="num">Billed</th><th class="num">Paid</th><th class="num">Balance</th></tr></thead>
         <tbody>
-          ${(data.rows||[]).map(r=>`<tr><td>${UI.escape(r.supplier)}</td><td class="num">${UI.money(r.billed)}</td>
+          ${(data.lines||[]).map(r=>`<tr><td>${UI.escape(r.supplier)}</td><td class="num">${UI.money(r.billed)}</td>
             <td class="num">${UI.money(r.paid)}</td><td class="num">${UI.money(r.balance)}</td></tr>`).join("")}
+          ${!(data.lines||[]).length?`<tr><td colspan="4" style="text-align:center;padding:28px">No supplier balances found.</td></tr>`:""}
           <tr class="rpt-grand"><td><strong>Total</strong></td><td class="num"><strong>${UI.money(data.total_billed||0)}</strong></td>
             <td class="num"><strong>${UI.money(data.total_paid||0)}</strong></td>
             <td class="num"><strong>${UI.money(data.total_balance||0)}</strong></td></tr>
@@ -389,18 +414,30 @@ Router.register("report-supplier-balances", (m) => reportScreen(m, {
 Router.register("report-supplier-statement", (m) => reportScreen(m, {
   title: "Supplier Statement", action: "reportSupplierStatement", mode: "range",
   extraFilters: `<label class="field"><span class="field-label">Supplier</span>
-    <select id="rpt-supplier"><option value="">All Suppliers</option></select></label>`,
+    <select id="rpt-supplier"><option value="">Select a supplier…</option></select></label>`,
   gatherExtra(mount) { return { supplier_id: mount.querySelector("#rpt-supplier").value }; },
+  async init(mount) {
+    const supps = await API.list("suppliers");
+    const sel = mount.querySelector("#rpt-supplier");
+    supps.forEach(s => sel.add(new Option(s.name, s.id)));
+  },
   render(data, {from, to, co}) {
+    if (data.need_pick) {
+      return `<div class="card"><div class="empty"><p>Select a supplier above and click View to see their statement.</p></div></div>`;
+    }
     return `<div class="card report-doc no-print-card">
       <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
-        <div class="report-title">Supplier Statement</div>
+        <div class="report-title">Supplier Statement — ${UI.escape(data.name||"")}</div>
         <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
       <table class="data-table report-table">
         <thead><tr><th>Date</th><th>Type</th><th>Number</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
-        <tbody>${(data.rows||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.type)}</td>
+        <tbody>
+          <tr class="rpt-subtotal"><td colspan="5">Opening Balance</td><td class="num">${UI.money(data.opening||0)}</td></tr>
+          ${(data.lines||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.type)}</td>
           <td>${UI.escape(r.number||"")}</td><td class="num">${r.debit?UI.money(r.debit):""}</td>
           <td class="num">${r.credit?UI.money(r.credit):""}</td><td class="num">${UI.money(r.balance)}</td></tr>`).join("")}
+          ${!(data.lines||[]).length?`<tr><td colspan="6" style="text-align:center;padding:20px">No activity in this period.</td></tr>`:""}
+          <tr class="rpt-grand"><td colspan="5"><strong>Closing Balance</strong></td><td class="num"><strong>${UI.money(data.closing||0)}</strong></td></tr>
         </tbody>
       </table></div>`;
   }
@@ -418,10 +455,11 @@ Router.register("report-journal", (m) => reportScreen(m, {
         <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
       <table class="data-table report-table">
         <thead><tr><th>Date</th><th>Account</th><th>Memo</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
-        <tbody>${(data.rows||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.account)}</td>
+        <tbody>${(data.lines||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.account)}</td>
           <td>${UI.escape(r.memo||"")}</td>
           <td class="num">${r.debit?UI.money(r.debit):""}</td>
           <td class="num">${r.credit?UI.money(r.credit):""}</td></tr>`).join("")}
+          ${!(data.lines||[]).length?`<tr><td colspan="5" style="text-align:center;padding:28px">No journal entries in this period.</td></tr>`:""}
           <tr class="rpt-grand"><td colspan="3"><strong>Total</strong></td>
             <td class="num"><strong>${UI.money(data.total_debit||0)}</strong></td>
             <td class="num"><strong>${UI.money(data.total_credit||0)}</strong></td></tr>
@@ -435,21 +473,29 @@ Router.register("report-general-ledger", (m) => reportScreen(m, {
   extraFilters: `<label class="field"><span class="field-label">Account</span>
     <select id="rpt-gl-acct"><option value="">All Accounts</option></select></label>`,
   gatherExtra(mount) { return { account_id: mount.querySelector("#rpt-gl-acct").value }; },
+  async init(mount) {
+    const accts = await API.list("accounts");
+    const sel = mount.querySelector("#rpt-gl-acct");
+    accts.forEach(a => sel.add(new Option(a.account_name, a.id)));
+  },
   render(data, {from, to, co}) {
     return `<div class="card report-doc no-print-card">
       <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
         <div class="report-title">General Ledger</div>
         <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
+      ${!(data.accounts||[]).length?`<div class="empty" style="padding:28px"><p>No account activity in this period.</p></div>`:""}
       ${(data.accounts||[]).map(acct => `
         <div style="margin-bottom:24px">
-          <h3 class="gl-acct" style="margin:0 0 8px;font-size:14px;color:#334155">${UI.escape(acct.name)} <span style="color:#94a3b8;font-weight:400">${UI.escape(acct.type)}</span></h3>
+          <h3 class="gl-acct" style="margin:0 0 8px;font-size:14px;color:#334155">${UI.escape(acct.account)} <span style="color:#94a3b8;font-weight:400">${UI.escape(acct.type)}</span></h3>
           <table class="data-table report-table">
             <thead><tr><th>Date</th><th>Memo</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
-            <tbody>${(acct.rows||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.memo||"")}</td>
+            <tbody>
+              <tr class="rpt-subtotal"><td colspan="4">Opening Balance</td><td class="num">${UI.money(acct.opening||0)}</td></tr>
+              ${(acct.lines||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.memo||"")}</td>
               <td class="num">${r.debit?UI.money(r.debit):""}</td><td class="num">${r.credit?UI.money(r.credit):""}</td>
               <td class="num">${UI.money(r.balance)}</td></tr>`).join("")}
               <tr class="rpt-subtotal"><td colspan="4"><strong>Closing Balance</strong></td>
-                <td class="num"><strong>${UI.money(acct.closing_balance)}</strong></td></tr>
+                <td class="num"><strong>${UI.money(acct.closing)}</strong></td></tr>
             </tbody>
           </table>
         </div>`).join("")}

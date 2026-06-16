@@ -24,12 +24,8 @@ const App = {
     document.body.innerHTML  = `
       <div class="login-wrap">
         <div class="login-card">
-          <div class="brand brand--lg">
-            <span class="brand-mark">${UI.escape(cfg.APP_SHORT)}</span>
-            <span class="brand-text">
-              <strong>${UI.escape(cfg.APP_NAME)}</strong>
-              <em>${UI.escape(cfg.TAGLINE)}</em>
-            </span>
+          <div class="brand brand--lg brand--logo">
+            <img src="assets/images/hashir-hub-lockup.png" alt="Hashir Hub" class="brand-lockup">
           </div>
           <form id="login-form" class="login-form" autocomplete="on">
             ${companies.length > 1 ? `
@@ -95,7 +91,7 @@ const App = {
     document.body.innerHTML = `
       <aside id="sidebar" class="sidebar">
         <div class="brand">
-          <span class="brand-mark">${UI.escape(cfg.APP_SHORT)}</span>
+          <span class="brand-mark brand-mark--img"><img src="assets/images/hashir-hub-icon.png" alt="" class="brand-logo"></span>
           <span class="brand-text"><strong>${UI.escape(companyLabel)}</strong><em>${UI.escape(cfg.TAGLINE)}</em></span>
         </div>
         <nav class="nav">${this.buildNav(cfg.MENU)}</nav>

@@ -2,7 +2,7 @@
    Adil Business Solutions — Customers, Suppliers & settings lists
    ===================================================================== */
 
-// ---- Customers (tabbed, matches Diyar New Customer) -------------------
+// ---- Customers (tabbed) -------------------------------------------
 const PAYMENT_DAYS = ['Any Day'].concat(Array.from({ length: 31 }, (_, i) => String(i + 1)));
 
 Router.register('customers', (m) => CRUD.page(m, {
