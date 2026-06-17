@@ -53,7 +53,7 @@ var SCHEMA = {
   InvoiceItems:   ['id','invoice_id','item_id','description','qty','unit_price','discount','line_total'],
   SalesReceipts:     ['id','receipt_no','date','customer_id','customer_name','subtotal','discount','tax','total','paid','balance','status','notes','sales_rep','order_type','created_by','created_at'],
   SalesReceiptItems: ['id','receipt_id','item_id','description','qty','unit_price','discount','line_total'],
-  Payments:       ['id','date','customer_id','invoice_id','amount','method','reference','notes','created_at','is_deposited','deposit_id'],
+  Payments:       ['id','date','customer_id','invoice_id','amount','method','reference','notes','created_at','is_deposited','deposit_id','receipt_id'],
   Accounts:       ['id','account_number','account_name','account_type','system_key','parent_account_id','is_active','description','created_at'],
   Journal:        ['id','entry_id','entry_no','date','account_id','debit','credit','name','memo','source_type','source_id','created_by','created_at'],
   Deposits:       ['id','deposit_no','date','account_id','memo','total','created_by','created_at'],
@@ -666,6 +666,7 @@ function createInvoice_(p) {
     sheet_('Invoices').appendRow(SCHEMA.Invoices.map(function (h) { return safeCell_(rec[h]); }));
     writeInvoiceLines_(id, invoiceNo, d.lines, d.date);
     postSaleJournal_('invoice', id, invoiceNo, rec, p.token, 'ar');
+    postCogsJournal_('invoice', id, invoiceNo, d.lines, rec.date, p.token);
     return { id: id, invoice_no: invoiceNo };
   } finally {
     lock.releaseLock();
@@ -690,6 +691,7 @@ function updateInvoice_(p) {
   writeInvoiceLines_(id, inv.invoice_no, d.lines, d.date || inv.date);
   reverseSource_('invoice', id);
   postSaleJournal_('invoice', id, inv.invoice_no, get_('Invoices', id), p.token, 'ar');
+  postCogsJournal_('invoice', id, inv.invoice_no, d.lines, d.date || inv.date, p.token);
   return { id: id, invoice_no: inv.invoice_no };
 }
 
@@ -786,7 +788,15 @@ function createSalesReceipt_(p) {
     };
     sheet_('SalesReceipts').appendRow(SCHEMA.SalesReceipts.map(function (h) { return safeCell_(rec[h]); }));
     writeReceiptLines_(id, receiptNo, d.lines, d.date);
-    postSaleJournal_('receipt', id, receiptNo, rec, p.token, 'cash');
+    postSaleJournal_('receipt', id, receiptNo, rec, p.token, 'undeposited');
+    postCogsJournal_('receipt', id, receiptNo, d.lines, rec.date, p.token);
+    if (total > 0) {
+      create_('Payments', {
+        date: rec.date, customer_id: rec.customer_id, invoice_id: '', receipt_id: id,
+        amount: total, method: 'Sales Receipt', reference: receiptNo,
+        notes: rec.customer_name, is_deposited: '', deposit_id: ''
+      });
+    }
     return { id: id, receipt_no: receiptNo };
   } finally {
     lock.releaseLock();
@@ -797,6 +807,10 @@ function updateSalesReceipt_(p) {
   var id = p.id, d = p.data || {};
   var r = rows_('SalesReceipts').filter(function (x) { return String(x.id) === String(id); })[0];
   if (!r) throw new Error('Sales receipt not found.');
+  var existingPmt = rows_('Payments').filter(function (x) { return String(x.receipt_id) === String(id); })[0];
+  if (existingPmt && String(existingPmt.is_deposited) === '1') {
+    throw new Error('This sales receipt has already been deposited. Delete the deposit first if you need to change it.');
+  }
   deleteWhere_('SalesReceiptItems', 'receipt_id', id);
   deleteWhere_('StockMovements', 'reference_id', id);
   var total = Number(d.total || 0);
@@ -809,7 +823,17 @@ function updateSalesReceipt_(p) {
   });
   writeReceiptLines_(id, r.receipt_no, d.lines, d.date || r.date);
   reverseSource_('receipt', id);
-  postSaleJournal_('receipt', id, r.receipt_no, get_('SalesReceipts', id), p.token, 'cash');
+  var updated = get_('SalesReceipts', id);
+  postSaleJournal_('receipt', id, r.receipt_no, updated, p.token, 'undeposited');
+  postCogsJournal_('receipt', id, r.receipt_no, d.lines, d.date || r.date, p.token);
+  if (existingPmt) deleteWhere_('Payments', 'id', existingPmt.id);
+  if (total > 0) {
+    create_('Payments', {
+      date: updated.date, customer_id: updated.customer_id, invoice_id: '', receipt_id: id,
+      amount: total, method: 'Sales Receipt', reference: r.receipt_no,
+      notes: updated.customer_name, is_deposited: '', deposit_id: ''
+    });
+  }
   return { id: id, receipt_no: r.receipt_no };
 }
 
@@ -822,9 +846,14 @@ function salesReceiptDetail_(id) {
 }
 
 function deleteSalesReceipt_(id) {
+  var existingPmt = rows_('Payments').filter(function (x) { return String(x.receipt_id) === String(id); })[0];
+  if (existingPmt && String(existingPmt.is_deposited) === '1') {
+    throw new Error('This sales receipt has already been deposited. Delete the deposit first.');
+  }
   update_('SalesReceipts', id, { status: 'deleted' });
   deleteWhere_('SalesReceiptItems', 'receipt_id', id);
   deleteWhere_('StockMovements', 'reference_id', id);
+  if (existingPmt) deleteWhere_('Payments', 'id', existingPmt.id);
   reverseSource_('receipt', id);
   return { id: id, deleted: true };
 }
@@ -921,6 +950,35 @@ function postSaleJournal_(sourceType, id, no, rec, token, cashKey) {
   try {
     postEntry_({ date: rec.date, memo: (sourceType === 'invoice' ? 'Invoice ' : 'Sales Receipt ') + no,
       source_type: sourceType, source_id: id, created_by: userFromToken_(token), lines: lines });
+  } catch (e) { /* never block the document on a posting hiccup */ }
+}
+
+// books Cost of Goods Sold against Inventory Asset for each item line, using
+// that item's current cost_price at the moment of the sale (so a later cost
+// change never silently rewrites a transaction that already happened)
+function postCogsJournal_(sourceType, id, no, lines, dateStr, token) {
+  var groups = {};
+  (lines || []).forEach(function (ln) {
+    if (!ln.item_id) return;
+    var qty = Number(ln.qty || 0); if (qty <= 0) return;
+    var it = get_('Items', ln.item_id); if (!it) return;
+    var cost = Number(it.cost_price || 0); if (cost <= 0) return;
+    var cogsAcct = it.cogs_account_id || acctId_('cogs');
+    var invAcct = it.asset_account_id || acctId_('inventory');
+    if (!cogsAcct || !invAcct) return;
+    var key = cogsAcct + '|' + invAcct;
+    groups[key] = (groups[key] || 0) + cost * qty;
+  });
+  var jlines = [];
+  Object.keys(groups).forEach(function (key) {
+    var amt = groups[key]; if (amt <= 0) return;
+    var parts = key.split('|');
+    jlines.push({ account_id: parts[0], debit: amt, credit: 0 });
+    jlines.push({ account_id: parts[1], debit: 0, credit: amt });
+  });
+  if (!jlines.length) return;
+  try {
+    postEntry_({ date: dateStr, memo: 'COGS for ' + no, source_type: sourceType, source_id: id, created_by: userFromToken_(token), lines: jlines });
   } catch (e) { /* never block the document on a posting hiccup */ }
 }
 
@@ -1033,7 +1091,12 @@ function paymentsList_() {
 function undepositedList_() {
   var custs = {}; list_('Customers', {}).forEach(function (c) { custs[String(c.id)] = c.name; });
   return rows_('Payments').filter(function (r) { return !r.is_deposited || String(r.is_deposited) === ''; })
-    .map(function (r) { var o = strip_(r); o.customer = custs[String(r.customer_id)] || ''; return o; });
+    .map(function (r) {
+      var o = strip_(r);
+      o.customer = custs[String(r.customer_id)] || r.notes || '';
+      o.source = r.receipt_id ? 'Sales Receipt' : 'Invoice Payment';
+      return o;
+    });
 }
 
 function recordDeposit_(p) {
@@ -1166,6 +1229,11 @@ function writeBillLines_(billId, billNo, lines, dateStr, billType) {
         qty: Number(ln.qty || 0) * Number(ln.multiplier || 1),
         reference_type: 'bill', reference_id: billId, notes: billNo
       });
+      // the cost on this bill becomes the item's current/last cost, superseding
+      // whatever cost was set when the item was first created
+      if (billType !== 'Credit' && Number(ln.cost || 0) > 0) {
+        update_('Items', ln.item_id, { cost_price: Number(ln.cost) });
+      }
     }
   });
 }

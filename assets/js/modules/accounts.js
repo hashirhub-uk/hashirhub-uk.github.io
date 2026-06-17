@@ -428,10 +428,10 @@ Router.register('show-undeposited-list', async (mount) => {
       <label class="field field--wide"><span class="field-label">Memo</span><input id="dp-memo"></label>
     </div></div>
     <div class="card no-pad"><div class="table-wrap"><table class="data-table"><thead><tr>
-      <th><input type="checkbox" id="dp-all"></th><th>Date</th><th>Customer</th><th>Reference</th><th class="num">Amount</th>
+      <th><input type="checkbox" id="dp-all"></th><th>Date</th><th>Customer</th><th>Source</th><th>Reference</th><th class="num">Amount</th>
       </tr></thead><tbody>${undeposited.map(p => `<tr>
         <td><input type="checkbox" class="dp-line" data-id="${UI.escape(p.id)}" data-amt="${UI.escape(p.amount)}"></td>
-        <td>${UI.escape(UI.date(p.date))}</td><td>${UI.escape(p.customer)}</td><td>${UI.escape(p.reference || '')}</td><td class="num">${UI.money(p.amount)}</td>
+        <td>${UI.escape(UI.date(p.date))}</td><td>${UI.escape(p.customer)}</td><td>${UI.escape(p.source || '')}</td><td>${UI.escape(p.reference || '')}</td><td class="num">${UI.money(p.amount)}</td>
       </tr>`).join('')}</tbody></table></div></div>
     <div class="totals-row"><div></div><div class="totals-box">
       <div class="totals-line totals-grand"><span>Total to Deposit</span><span id="dp-total" class="num">0.00</span></div>
