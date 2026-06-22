@@ -2326,189 +2326,441 @@ function reportPurchasesBySupplier_(p) {
 //  SALES REPORTS  (v7.9)
 // =====================================================================
 
-function reportSalesByCategory_(p) {
-  var from = String(p.from||''), to = String(p.to||today_());
-  var cats = nameMap_('Categories');
-  var itemCat = {}; rows_('Items').forEach(function(it){ itemCat[String(it.id)] = String(it.category_id||''); });
-  var map = {};
-  function addLine(lines, date) {
-    var d = String(date||'').slice(0,10);
-    if ((from && d < from) || (to && d > to)) return;
-    (lines||[]).forEach(function(l){
-      var cid = itemCat[String(l.item_id||'')] || '';
-      var name = cats[cid] || 'Uncategorized';
-      if (!map[name]) map[name] = { category: name, qty: 0, total: 0 };
-      map[name].qty   += Number(l.qty||0);
-      map[name].total += Number(l.line_total||0);
-    });
-  }
-  rows_('Invoices').forEach(function(inv){ addLine(rows_('InvoiceItems').filter(function(i){ return String(i.invoice_id)===String(inv.id); }), inv.date); });
-  rows_('SalesReceipts').forEach(function(r){ addLine(rows_('SalesReceiptItems').filter(function(i){ return String(i.receipt_id)===String(r.id); }), r.date); });
-  var result = Object.values(map).sort(function(a,b){ return b.total-a.total; });
-  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0) };
-}
-
-function reportSalesByItems_(p) {
-  var from = String(p.from||''), to = String(p.to||today_());
-  var cats = nameMap_('Categories');
-  var itemMeta = {}; rows_('Items').forEach(function(it){ itemMeta[String(it.id)] = { name: it.name||'', cat: cats[String(it.category_id||'')] || '' }; });
-  var map = {};
-  function addLines(lines, date) {
-    var d = String(date||'').slice(0,10);
-    if ((from && d < from)||(to && d > to)) return;
-    (lines||[]).forEach(function(l){
-      var id = String(l.item_id||'');
-      var meta = itemMeta[id] || { name: l.description||'Unknown', cat: '' };
-      if (!map[id]) map[id] = { name: meta.name, category: meta.cat, qty: 0, total: 0 };
-      map[id].qty   += Number(l.qty||0);
-      map[id].total += Number(l.line_total||0);
-    });
-  }
-  rows_('Invoices').forEach(function(inv){ addLines(rows_('InvoiceItems').filter(function(i){ return String(i.invoice_id)===String(inv.id); }), inv.date); });
-  rows_('SalesReceipts').forEach(function(r){ addLines(rows_('SalesReceiptItems').filter(function(i){ return String(i.receipt_id)===String(r.id); }), r.date); });
-  var result = Object.values(map).sort(function(a,b){ return b.total-a.total; });
-  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0) };
-}
-
-function reportInvoicesSummary_(p) {
-  var from = String(p.from||''), to = String(p.to||today_());
-  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
-  var invoices = rows_('Invoices').filter(function(r){
-    var d = String(r.date||'').slice(0,10);
-    return (!from||d>=from) && (!to||d<=to);
+// =====================================================================
+//  SHARED HELPERS for sales reports
+// =====================================================================
+function buildSalesIndex_() {
+  // Build indexes once for efficiency
+  var invItemsIdx = {}, rcpItemsIdx = {};
+  rows_('InvoiceItems').forEach(function(l){
+    var k = String(l.invoice_id); invItemsIdx[k] = invItemsIdx[k] || []; invItemsIdx[k].push(l);
   });
-  var rows = invoices.map(function(inv){
-    var c = custs[String(inv.customer_id||'')] || {};
-    return { invoice_no: inv.invoice_no||'', date: inv.date||'', customer: c.name||'', total: Number(inv.total||0), paid: Number(inv.paid||0), balance: Number(inv.balance||0), status: inv.status||'' };
-  }).sort(function(a,b){ return String(b.date).localeCompare(String(a.date)); });
-  return { rows: rows, grand_total: rows.reduce(function(s,r){return s+r.total;},0), grand_count: rows.length };
+  rows_('SalesReceiptItems').forEach(function(l){
+    var k = String(l.receipt_id); rcpItemsIdx[k] = rcpItemsIdx[k] || []; rcpItemsIdx[k].push(l);
+  });
+  var itemMeta = {};
+  rows_('Items').forEach(function(it){
+    itemMeta[String(it.id)] = { name: it.name||'', category_id: String(it.category_id||''),
+      brand_id: String(it.brand_id||''), cost: Number(it.cost_price||0),
+      commission: Number(it.commission||0), uom: it.uom_id||'' };
+  });
+  return { invItemsIdx: invItemsIdx, rcpItemsIdx: rcpItemsIdx, itemMeta: itemMeta };
 }
 
+function inDateRange_(dateStr, from, to) {
+  var d = String(dateStr||'').slice(0,10);
+  return (!from || d >= from) && (!to || d <= to);
+}
+
+// =====================================================================
+//  1. Sales by Category Summary
+// =====================================================================
+function reportSalesByCategory_(p) {
+  var from = String(p.from||''), to = String(p.to||'');
+  var idx = buildSalesIndex_();
+  var cats = {}, catBrand = {};
+  rows_('Categories').forEach(function(c){ cats[String(c.id)] = c.name||'Uncategorized'; });
+  var brands = {}; rows_('Brands').forEach(function(b){ brands[String(b.id)] = b.name||'Default'; });
+
+  // map: brandName -> categoryName -> { qty, amount, cogs }
+  var map = {};
+  function ensureCat(brandName, catName) {
+    if (!map[brandName]) map[brandName] = {};
+    if (!map[brandName][catName]) map[brandName][catName] = { qty:0, amount:0, cogs:0 };
+    return map[brandName][catName];
+  }
+
+  // seed all categories so zeros appear too
+  rows_('Categories').forEach(function(c) {
+    var catName = c.name||'Uncategorized'; var brandName = 'Default';
+    ensureCat(brandName, catName);
+  });
+
+  function processLines(lines, doc, docFrom) {
+    if (!inDateRange_(docFrom, from, to)) return;
+    (lines||[]).forEach(function(l) {
+      var meta = idx.itemMeta[String(l.item_id||'')] || {};
+      var catName = cats[meta.category_id||''] || 'Uncategorized';
+      var brandName = brands[meta.brand_id||''] || 'Default';
+      var row = ensureCat(brandName, catName);
+      var qty = Number(l.qty||0), amt = Number(l.line_total||0);
+      row.qty += qty; row.amount += amt; row.cogs += qty * (meta.cost||0);
+    });
+  }
+
+  rows_('Invoices').forEach(function(inv){
+    processLines(idx.invItemsIdx[String(inv.id)]||[], inv, inv.date);
+  });
+  rows_('SalesReceipts').forEach(function(r){
+    processLines(idx.rcpItemsIdx[String(r.id)]||[], r, r.date);
+  });
+
+  var grandQty=0, grandAmt=0, grandCogs=0;
+  var groups = Object.keys(map).sort().map(function(brandName) {
+    var gQty=0, gAmt=0, gCogs=0;
+    var cats2 = Object.keys(map[brandName]).sort().map(function(catName) {
+      var row = map[brandName][catName];
+      gQty+=row.qty; gAmt+=row.amount; gCogs+=row.cogs;
+      return { name: catName, qty: row.qty, amount: row.amount, cogs: row.cogs };
+    });
+    grandQty+=gQty; grandAmt+=gAmt; grandCogs+=gCogs;
+    return { name: brandName, categories: cats2, total: { qty:gQty, amount:gAmt, cogs:gCogs } };
+  });
+  return { from:from, to:to, groups:groups,
+    grand: { qty:grandQty, amount:grandAmt, cogs:grandCogs } };
+}
+
+// =====================================================================
+//  2. Sales by Items Summary
+// =====================================================================
+function reportSalesByItems_(p) {
+  var from = String(p.from||''), to = String(p.to||'');
+  var idx = buildSalesIndex_();
+  var cats = {}; rows_('Categories').forEach(function(c){ cats[String(c.id)] = c.name||'Uncategorized'; });
+  var brands = {}; rows_('Brands').forEach(function(b){ brands[String(b.id)] = b.name||'Default'; });
+
+  // map: brandName -> catName -> itemId -> { name, qty, amount, cogs }
+  var map = {};
+  function ensureItem(brandName, catName, itemId, itemName) {
+    if (!map[brandName]) map[brandName] = {};
+    if (!map[brandName][catName]) map[brandName][catName] = {};
+    if (!map[brandName][catName][itemId]) map[brandName][catName][itemId] = { name:itemName, qty:0, amount:0, cogs:0 };
+    return map[brandName][catName][itemId];
+  }
+
+  function processLines(lines, docDate) {
+    if (!inDateRange_(docDate, from, to)) return;
+    (lines||[]).forEach(function(l) {
+      var meta = idx.itemMeta[String(l.item_id||'')] || {};
+      var catName  = cats[meta.category_id||'']  || 'Uncategorized';
+      var brandName = brands[meta.brand_id||''] || 'Default';
+      var itemName  = meta.name || l.description || 'Unknown';
+      var row = ensureItem(brandName, catName, String(l.item_id||''), itemName);
+      var qty = Number(l.qty||0), amt = Number(l.line_total||0);
+      row.qty += qty; row.amount += amt; row.cogs += qty * (meta.cost||0);
+    });
+  }
+
+  rows_('Invoices').forEach(function(inv){ processLines(idx.invItemsIdx[String(inv.id)]||[], inv.date); });
+  rows_('SalesReceipts').forEach(function(r){ processLines(idx.rcpItemsIdx[String(r.id)]||[], r.date); });
+
+  var grandQty=0, grandAmt=0, grandCogs=0;
+  var groups = Object.keys(map).sort().map(function(brandName) {
+    var gQty=0, gAmt=0, gCogs=0;
+    var catList = Object.keys(map[brandName]).sort().map(function(catName) {
+      var cQty=0, cAmt=0, cCogs=0;
+      var items = Object.values(map[brandName][catName]).sort(function(a,b){return b.amount-a.amount;});
+      items.forEach(function(it){ cQty+=it.qty; cAmt+=it.amount; cCogs+=it.cogs; });
+      gQty+=cQty; gAmt+=cAmt; gCogs+=cCogs;
+      return { name:catName, items:items, total:{qty:cQty, amount:cAmt, cogs:cCogs} };
+    });
+    grandQty+=gQty; grandAmt+=gAmt; grandCogs+=gCogs;
+    return { name:brandName, categories:catList, total:{qty:gQty, amount:gAmt, cogs:gCogs} };
+  });
+  return { from:from, to:to, groups:groups,
+    grand:{qty:grandQty, amount:grandAmt, cogs:grandCogs} };
+}
+
+// =====================================================================
+//  3. Invoices Summary — S#, Type, Date, Num, Customer, Items Count,
+//     Sale Amount, COGS Amount, Income
+// =====================================================================
+function reportInvoicesSummary_(p) {
+  var from = String(p.from||''), to = String(p.to||'');
+  var idx = buildSalesIndex_();
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+
+  // COGS per source from Journal
+  var cogsAcctIds = {};
+  rows_('Accounts').filter(function(a){ return a.account_type==='Cost of Goods Sold'||a.system_key==='cogs'; })
+    .forEach(function(a){ cogsAcctIds[String(a.id)] = true; });
+  var cogsBySource = {};
+  rows_('Journal').filter(function(r){ return cogsAcctIds[String(r.account_id)]; })
+    .forEach(function(r){
+      var k = String(r.source_type||'')+'|'+String(r.source_id||'');
+      cogsBySource[k] = (cogsBySource[k]||0) + Number(r.debit||0);
+    });
+
+  var rows = [];
+  rows_('Invoices').filter(function(r){ return inDateRange_(r.date, from, to) && r.status!=='deleted'; })
+    .forEach(function(inv) {
+      var c = custs[String(inv.customer_id||'')] || {};
+      var lines = idx.invItemsIdx[String(inv.id)]||[];
+      var cogs = cogsBySource['invoice|'+String(inv.id)] || 0;
+      rows.push({ type:'Invoice', date:inv.date, num:inv.invoice_no,
+        customer:c.name||'', customer_id:String(inv.customer_id||''),
+        items_count:lines.length, sale_amount:Number(inv.total||0),
+        cogs_amount:cogs, income:Number(inv.total||0)-cogs, status:inv.status||'' });
+    });
+  rows_('SalesReceipts').filter(function(r){ return inDateRange_(r.date, from, to) && r.status!=='deleted'; })
+    .forEach(function(r) {
+      var lines = idx.rcpItemsIdx[String(r.id)]||[];
+      var cogs = cogsBySource['receipt|'+String(r.id)] || 0;
+      rows.push({ type:'Sales Receipt', date:r.date, num:r.receipt_no,
+        customer:r.customer_name||(custs[String(r.customer_id||'')]||{}).name||'Walk-in',
+        customer_id:String(r.customer_id||''),
+        items_count:lines.length, sale_amount:Number(r.total||0),
+        cogs_amount:cogs, income:Number(r.total||0)-cogs, status:r.status||'' });
+    });
+  rows.sort(function(a,b){ return String(a.date).localeCompare(String(b.date))||String(a.num).localeCompare(String(b.num)); });
+  return { from:from, to:to, rows:rows,
+    total_items: rows.reduce(function(s,r){return s+r.items_count;},0),
+    total_sale:  rows.reduce(function(s,r){return s+r.sale_amount;},0),
+    total_cogs:  rows.reduce(function(s,r){return s+r.cogs_amount;},0),
+    total_income:rows.reduce(function(s,r){return s+r.income;},0),
+    grand_count: rows.length };
+}
+
+// =====================================================================
+//  4. Sales by Customers Summary
+// =====================================================================
 function reportSalesByCustomers_(p) {
-  var from = String(p.from||''), to = String(p.to||today_());
+  var from = String(p.from||''), to = String(p.to||'');
   var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
   var map = {};
-  function add(recs, keyField) {
-    recs.filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
-      .forEach(function(r){
-        var cid = String(r.customer_id||'');
-        var c = custs[cid] || {};
-        if (!map[cid]) map[cid] = { customer: c.name||r.customer_name||'Walk-in', invoices: 0, receipts: 0, total: 0, paid: 0 };
-        map[cid][keyField]++;
+  function add(recs, nameField) {
+    recs.filter(function(r){ return inDateRange_(r.date, from, to) && r.status!=='deleted'; })
+      .forEach(function(r) {
+        var cid = String(r.customer_id||''); var c = custs[cid]||{};
+        var name = c.name||r[nameField]||'Walk-in Customer';
+        if (!map[cid]) map[cid] = { id:cid, customer:name, total:0 };
         map[cid].total += Number(r.total||0);
-        map[cid].paid  += Number(r.paid||0);
       });
   }
-  add(rows_('Invoices'), 'invoices');
-  add(rows_('SalesReceipts'), 'receipts');
-  var result = Object.values(map).map(function(r){ return Object.assign({},r,{balance:r.total-r.paid}); }).sort(function(a,b){return b.total-a.total;});
-  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0) };
+  add(rows_('Invoices'), 'customer_name');
+  add(rows_('SalesReceipts'), 'customer_name');
+  var rows = Object.values(map).sort(function(a,b){return b.total-a.total;});
+  return { rows:rows, grand_total:rows.reduce(function(s,r){return s+r.total;},0) };
 }
 
+// =====================================================================
+//  5. Sales By Representative Summary
+// =====================================================================
 function reportSalesByRep_(p) {
-  var from = String(p.from||''), to = String(p.to||today_());
-  var reps = nameMap_('SalesRepresentatives');
-  var map = {};
-  rows_('Invoices').filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
-    .forEach(function(inv){
-      var rid = String(inv.sales_rep||inv.sales_rep_id||'');
-      var name = reps[rid] || (rid ? rid : 'No Rep');
-      if (!map[name]) map[name] = { rep: name, count: 0, total: 0 };
-      map[name].count++; map[name].total += Number(inv.total||0);
-    });
-  var result = Object.values(map).sort(function(a,b){return b.total-a.total;});
-  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0) };
-}
-
-function reportReturnStockByRep_(p) {
-  var from = String(p.from||''), to = String(p.to||today_());
-  var reps = nameMap_('SalesRepresentatives');
-  var map = {};
-  rows_('CreditMemos').filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
-    .forEach(function(m){
-      var rid = String(m.sales_rep||m.sales_rep_id||'');
-      var name = reps[rid] || (rid ? rid : 'No Rep');
-      if (!map[name]) map[name] = { rep: name, count: 0, total: 0 };
-      map[name].count++; map[name].total += Number(m.total||0);
-    });
-  var result = Object.values(map).sort(function(a,b){return b.total-a.total;});
-  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0) };
-}
-
-function reportSalesBySalesman_(p) {
-  return reportSalesByRep_(p); // uses same data - sales rep = salesman
-}
-
-function reportFinancialRecovery_(p) {
-  var from = String(p.from||''), to = String(p.to||today_());
+  var from = String(p.from||''), to = String(p.to||'');
+  var repNames = {}; rows_('SalesRepresentatives').forEach(function(r){ repNames[String(r.id)] = r.name||''; });
   var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
-  var invoiced = 0, collected = 0;
-  rows_('Invoices').filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
-    .forEach(function(r){ invoiced += Number(r.total||0); });
-  rows_('Payments').filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
-    .forEach(function(r){ collected += Number(r.amount||0); });
-  var recovery = invoiced ? (collected/invoiced)*100 : 0;
-  return { invoiced: invoiced, collected: collected, outstanding: invoiced-collected, recovery_rate: Math.round(recovery*10)/10 };
+  var map = {};
+  function ensureRep(name) {
+    if (!map[name]) map[name] = { rep:name, total:0 };
+    return map[name];
+  }
+  function repName(invoice) {
+    // try sales_rep field, fall back to customer's sales rep, then created_by
+    if (invoice.sales_rep && repNames[invoice.sales_rep]) return repNames[invoice.sales_rep];
+    if (invoice.sales_rep_id && repNames[invoice.sales_rep_id]) return repNames[invoice.sales_rep_id];
+    var cust = custs[String(invoice.customer_id||'')]||{};
+    if (cust.sales_rep_id && repNames[cust.sales_rep_id]) return repNames[cust.sales_rep_id];
+    return invoice.created_by || 'Unassigned';
+  }
+  rows_('Invoices').filter(function(r){ return inDateRange_(r.date, from, to) && r.status!=='deleted'; })
+    .forEach(function(inv){ ensureRep(repName(inv)).total += Number(inv.total||0); });
+  rows_('SalesReceipts').filter(function(r){ return inDateRange_(r.date, from, to) && r.status!=='deleted'; })
+    .forEach(function(r){
+      var name = r.sales_rep || (custs[String(r.customer_id||'')]||{}).sales_rep_id || r.created_by || 'Unassigned';
+      if (repNames[name]) name = repNames[name];
+      ensureRep(name).total += Number(r.total||0);
+    });
+  var rows = Object.values(map).sort(function(a,b){return b.total-a.total;});
+  return { rows:rows, grand_total:rows.reduce(function(s,r){return s+r.total;},0) };
 }
 
+// =====================================================================
+//  6. Return Stock By Representative Summary
+//     Per-ITEM: Invoiced Qty/Amount vs Returned Qty/Amount (Credit Memos)
+// =====================================================================
+function reportReturnStockByRep_(p) {
+  var from = String(p.from||''), to = String(p.to||'');
+  var idx = buildSalesIndex_();
+  var cmoItemsIdx = {};
+  rows_('CreditMemoItems').forEach(function(l){
+    var k = String(l.memo_id||l.credit_memo_id||''); cmoItemsIdx[k] = cmoItemsIdx[k]||[]; cmoItemsIdx[k].push(l);
+  });
+  var itemNames = {}; rows_('Items').forEach(function(it){ itemNames[String(it.id)] = it.name||''; });
+  var map = {};
+  function ensureItem(itemId, itemName) {
+    if (!map[itemId]) map[itemId] = { name:itemName, inv_qty:0, inv_amt:0, ret_qty:0, ret_amt:0 };
+    return map[itemId];
+  }
+  // Invoiced
+  rows_('Invoices').filter(function(r){ return inDateRange_(r.date, from, to) && r.status!=='deleted'; })
+    .forEach(function(inv){
+      (idx.invItemsIdx[String(inv.id)]||[]).forEach(function(l){
+        var id = String(l.item_id||''); if (!id) return;
+        var row = ensureItem(id, itemNames[id]||l.description||'');
+        row.inv_qty += Number(l.qty||0); row.inv_amt += Number(l.line_total||0);
+      });
+    });
+  rows_('SalesReceipts').filter(function(r){ return inDateRange_(r.date, from, to) && r.status!=='deleted'; })
+    .forEach(function(r){
+      (idx.rcpItemsIdx[String(r.id)]||[]).forEach(function(l){
+        var id = String(l.item_id||''); if (!id) return;
+        var row = ensureItem(id, itemNames[id]||l.description||'');
+        row.inv_qty += Number(l.qty||0); row.inv_amt += Number(l.line_total||0);
+      });
+    });
+  // Returned (Credit Memos)
+  rows_('CreditMemos').filter(function(r){ return inDateRange_(r.date, from, to) && r.status!=='deleted'; })
+    .forEach(function(m){
+      var mId = String(m.id||'');
+      (cmoItemsIdx[mId]||[]).forEach(function(l){
+        var id = String(l.item_id||''); if (!id) return;
+        var row = ensureItem(id, itemNames[id]||l.description||'');
+        row.ret_qty += Number(l.qty||0); row.ret_amt += Number(l.line_total||0);
+      });
+    });
+  var rows = Object.values(map).filter(function(r){ return r.inv_qty>0||r.ret_qty>0; })
+    .sort(function(a,b){ return String(a.name).localeCompare(String(b.name)); })
+    .map(function(r){ return Object.assign({}, r, { bal_qty: r.inv_qty-r.ret_qty, bal_amt: r.inv_amt-r.ret_amt }); });
+  var g = rows.reduce(function(s,r){ return { inv_qty:s.inv_qty+r.inv_qty, inv_amt:s.inv_amt+r.inv_amt, ret_qty:s.ret_qty+r.ret_qty, ret_amt:s.ret_amt+r.ret_amt, bal_qty:s.bal_qty+r.bal_qty, bal_amt:s.bal_amt+r.bal_amt }; },
+    { inv_qty:0, inv_amt:0, ret_qty:0, ret_amt:0, bal_qty:0, bal_amt:0 });
+  return { rows:rows, grand:g };
+}
+
+// =====================================================================
+//  7. Sales By Salesman Summary
+//     Per-salesman → per-transaction-line: Date, Num, Item, Qty, Price, Amount, %age, Commission
+// =====================================================================
+function reportSalesBySalesman_(p) {
+  var from = String(p.from||''), to = String(p.to||'');
+  var idx = buildSalesIndex_();
+  var repNames = {}; rows_('SalesRepresentatives').forEach(function(r){ repNames[String(r.id)] = r.name||''; });
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+
+  function getRepName(doc) {
+    if (doc.sales_rep && repNames[doc.sales_rep]) return repNames[doc.sales_rep];
+    if (doc.sales_rep_id && repNames[doc.sales_rep_id]) return repNames[doc.sales_rep_id];
+    var cust = custs[String(doc.customer_id||'')]||{};
+    if (cust.sales_rep_id && repNames[cust.sales_rep_id]) return repNames[cust.sales_rep_id];
+    return doc.created_by || 'Unassigned';
+  }
+
+  var map = {};
+  function addDoc(docLines, doc, docNo, docType) {
+    if (!inDateRange_(doc.date, from, to) || doc.status==='deleted') return;
+    var repName = getRepName(doc);
+    if (!map[repName]) map[repName] = { rep:repName, lines:[], total:0, commission:0 };
+    (docLines||[]).forEach(function(l) {
+      var meta = idx.itemMeta[String(l.item_id||'')] || {};
+      var qty = Number(l.qty||0), price = Number(l.unit_price||0), amt = Number(l.line_total||0);
+      var commRate = Number(meta.commission||0);
+      var commAmt = amt * commRate / 100;
+      map[repName].lines.push({ date:doc.date, num:docNo, item:meta.name||l.description||'', qty:qty, price:price, amount:amt, comm_rate:commRate, commission:commAmt });
+      map[repName].total += amt; map[repName].commission += commAmt;
+    });
+  }
+
+  rows_('Invoices').forEach(function(inv){ addDoc(idx.invItemsIdx[String(inv.id)]||[], inv, inv.invoice_no, 'Invoice'); });
+  rows_('SalesReceipts').forEach(function(r){ addDoc(idx.rcpItemsIdx[String(r.id)]||[], r, r.receipt_no, 'Receipt'); });
+
+  // compute %age of rep total for each line
+  var salesmen = Object.values(map).map(function(s) {
+    s.lines = s.lines.sort(function(a,b){ return String(a.date).localeCompare(String(b.date)); }).map(function(l){
+      return Object.assign({}, l, { pct: s.total ? Math.round(l.amount/s.total*1000)/10 : 0 });
+    });
+    return s;
+  }).sort(function(a,b){ return b.total-a.total; });
+  return { from:from, to:to, salesmen:salesmen,
+    grand_total:     salesmen.reduce(function(s,r){return s+r.total;},0),
+    grand_commission:salesmen.reduce(function(s,r){return s+r.commission;},0) };
+}
+
+// =====================================================================
+//  8. Financial Recovery and Sales Performance Summary
+//     Per-customer: CCM Name, Region, Area, Total Sales, Recovered, Outstanding, Efficiency %
+// =====================================================================
+function reportFinancialRecovery_(p) {
+  var from = String(p.from||''), to = String(p.to||'');
+  var reps = {}; rows_('SalesRepresentatives').forEach(function(r){ reps[String(r.id)] = r.name||''; });
+  var areas = {}; rows_('Areas').forEach(function(a){ areas[String(a.id)] = { name:a.area_name||a.name||'', region:a.region||'' }; });
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+
+  var salesByCust = {}, paidByCust = {};
+  rows_('Invoices').filter(function(r){ return inDateRange_(r.date, from, to) && r.status!=='deleted'; })
+    .forEach(function(r){ var cid = String(r.customer_id||''); salesByCust[cid]=(salesByCust[cid]||0)+Number(r.total||0); });
+  rows_('SalesReceipts').filter(function(r){ return inDateRange_(r.date, from, to) && r.status!=='deleted'; })
+    .forEach(function(r){ var cid = String(r.customer_id||''); salesByCust[cid]=(salesByCust[cid]||0)+Number(r.total||0); });
+  rows_('Payments').filter(function(r){ return inDateRange_(r.date, from, to); })
+    .forEach(function(r){ var cid = String(r.customer_id||''); paidByCust[cid]=(paidByCust[cid]||0)+Number(r.amount||0); });
+
+  var rows = Object.keys(salesByCust).map(function(cid) {
+    var c = custs[cid]||{};
+    var area = areas[String(c.area_id||'')] || { name:'', region:'' };
+    var sold = salesByCust[cid]||0, paid = paidByCust[cid]||0;
+    var outstanding = sold - paid;
+    return { customer:c.name||'Unknown', ccm:reps[String(c.sales_rep_id||'')]||'', region:area.region, area:area.name, total_sales:sold, recovered:paid, outstanding:outstanding, efficiency: sold ? Math.round(paid/sold*1000)/10 : 0 };
+  }).sort(function(a,b){ return String(a.ccm).localeCompare(String(b.ccm))||String(a.customer).localeCompare(String(b.customer)); });
+  var g = rows.reduce(function(s,r){ return { total_sales:s.total_sales+r.total_sales, recovered:s.recovered+r.recovered, outstanding:s.outstanding+r.outstanding }; }, { total_sales:0, recovered:0, outstanding:0 });
+  g.efficiency = g.total_sales ? Math.round(g.recovered/g.total_sales*1000)/10 : 0;
+  return { rows:rows, grand:g };
+}
+
+// =====================================================================
+//  9. Invoice Items Summary  — Sr. No., Item, Total Qty.
+// =====================================================================
 function reportInvoiceItemsSummary_(p) {
-  var from = String(p.inv_from||''), to = String(p.inv_to||'');
-  var itemMeta = {}; rows_('Items').forEach(function(it){ itemMeta[String(it.id)] = it.name||''; });
-  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c.name||''; });
+  var fromNo = String(p.inv_from||''), toNo = String(p.inv_to||'');
+  var idx = buildSalesIndex_();
   var targetInvs = rows_('Invoices').filter(function(inv){
     var no = String(inv.invoice_no||'');
-    return (!from || no >= from) && (!to || no <= to);
+    return inv.status!=='deleted' && (!fromNo||no>=fromNo) && (!toNo||no<=toNo);
   });
   var map = {};
   targetInvs.forEach(function(inv){
-    rows_('InvoiceItems').filter(function(i){ return String(i.invoice_id)===String(inv.id); })
-      .forEach(function(l){
-        var id = String(l.item_id||l.description||'');
-        var name = itemMeta[id] || l.description || 'Unknown';
-        if (!map[name]) map[name] = { name: name, qty: 0, total: 0, customers: {} };
-        map[name].qty   += Number(l.qty||0);
-        map[name].total += Number(l.line_total||0);
-        var cid = String(inv.customer_id||'');
-        map[name].customers[cid] = (map[name].customers[cid]||0) + Number(l.line_total||0);
-      });
-  });
-  var result = Object.values(map).map(function(r){ return { name: r.name, qty: r.qty, total: r.total, cust_count: Object.keys(r.customers).length }; }).sort(function(a,b){return b.total-a.total;});
-  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0), invoice_count: targetInvs.length };
-}
-
-function reportInvoiceBatchPrint_(p) {
-  var from = String(p.inv_from||''), to = String(p.inv_to||'');
-  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
-  var invoices = rows_('Invoices').filter(function(inv){
-    var no = String(inv.invoice_no||'');
-    return (!from || no >= from) && (!to || no <= to);
-  });
-  return invoices.map(function(inv){
-    var c = custs[String(inv.customer_id||'')] || {};
-    var lines = rows_('InvoiceItems').filter(function(i){ return String(i.invoice_id)===String(inv.id); });
-    return { invoice_no: inv.invoice_no, date: inv.date, customer: c.name||'', address: c.address||'', phone: c.phone||'', total: Number(inv.total||0), paid: Number(inv.paid||0), balance: Number(inv.balance||0), status: inv.status||'', lines: lines };
-  });
-}
-
-function reportCustomersItemsSales_(p) {
-  var from = String(p.from||''), to = String(p.to||today_());
-  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
-  var itemMeta = {}; rows_('Items').forEach(function(it){ itemMeta[String(it.id)] = it.name||''; });
-  var map = {};
-  rows_('Invoices').filter(function(r){ var d=String(r.date||'').slice(0,10); return (!from||d>=from)&&(!to||d<=to); })
-    .forEach(function(inv){
-      var cid = String(inv.customer_id||'');
-      var cname = (custs[cid]||{}).name || 'Unknown';
-      rows_('InvoiceItems').filter(function(i){ return String(i.invoice_id)===String(inv.id); })
-        .forEach(function(l){
-          var key = cid + '|' + String(l.item_id||'');
-          if (!map[key]) map[key] = { customer: cname, item: itemMeta[String(l.item_id||'')] || l.description||'', qty: 0, total: 0 };
-          map[key].qty   += Number(l.qty||0);
-          map[key].total += Number(l.line_total||0);
-        });
+    (idx.invItemsIdx[String(inv.id)]||[]).forEach(function(l){
+      var id = String(l.item_id||''), name = (idx.itemMeta[id]||{}).name || l.description || 'Unknown';
+      if (!map[name]) map[name] = { name:name, qty:0 };
+      map[name].qty += Number(l.qty||0);
     });
-  var result = Object.values(map).sort(function(a,b){ return String(a.customer).localeCompare(String(b.customer)) || b.total-a.total; });
-  return { rows: result, grand_total: result.reduce(function(s,r){return s+r.total;},0) };
+  });
+  var rows = Object.values(map).sort(function(a,b){return String(a.name).localeCompare(String(b.name));});
+  return { rows:rows, invoice_count:targetInvs.length };
+}
+
+// =====================================================================
+//  10. Customers Items Sales Summary
+//      Grouped by customer → per transaction line: Inv.No., Date, Item, Qty, Orig Amt, Disc%, Disc Amt, Net Amt
+// =====================================================================
+function reportCustomersItemsSales_(p) {
+  var from = String(p.from||''), to = String(p.to||'');
+  var idx = buildSalesIndex_();
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c; });
+  var custOrder = {};
+
+  var map = {}; // custKey -> { name, rows, total_qty, total_orig, total_disc_amt, total_net }
+  function ensureCust(cid, name) {
+    if (!map[cid]) { map[cid] = { name:name, rows:[], total_qty:0, total_orig:0, total_disc_amt:0, total_net:0 }; custOrder[cid] = Object.keys(custOrder).length; }
+    return map[cid];
+  }
+
+  function processDoc(doc, docNo, lines) {
+    if (!inDateRange_(doc.date, from, to) || doc.status==='deleted') return;
+    var cid = String(doc.customer_id||'');
+    var cname = (custs[cid]||{}).name || doc.customer_name || 'Walk-in Customer';
+    var cust = ensureCust(cid, cname);
+    (lines||[]).forEach(function(l) {
+      var meta = idx.itemMeta[String(l.item_id||'')] || {};
+      var qty = Number(l.qty||0), unit = Number(l.unit_price||0);
+      var orig = qty * unit;
+      var discPct = Number(l.discount||0);
+      var discAmt = orig * discPct / 100;
+      var net = Number(l.line_total||0);
+      cust.rows.push({ inv_no:docNo, date:doc.date, item:meta.name||l.description||'', qty:qty, orig_amt:orig, disc_pct:discPct, disc_amt:discAmt, net_amt:net });
+      cust.total_qty+=qty; cust.total_orig+=orig; cust.total_disc_amt+=discAmt; cust.total_net+=net;
+    });
+  }
+
+  rows_('Invoices').forEach(function(inv){ processDoc(inv, inv.invoice_no, idx.invItemsIdx[String(inv.id)]||[]); });
+  rows_('SalesReceipts').forEach(function(r){ processDoc(r, r.receipt_no, idx.rcpItemsIdx[String(r.id)]||[]); });
+
+  var customers = Object.keys(custOrder).sort(function(a,b){ return custOrder[a]-custOrder[b]; }).map(function(cid){
+    var c = map[cid];
+    c.rows.sort(function(a,b){ return String(a.date).localeCompare(String(b.date))||String(a.inv_no).localeCompare(String(b.inv_no)); });
+    return c;
+  });
+  var gQty=0, gOrig=0, gDisc=0, gNet=0;
+  customers.forEach(function(c){ gQty+=c.total_qty; gOrig+=c.total_orig; gDisc+=c.total_disc_amt; gNet+=c.total_net; });
+  return { customers:customers, grand:{ qty:gQty, orig_amt:gOrig, disc_amt:gDisc, net_amt:gNet } };
 }
 
 // =====================================================================
