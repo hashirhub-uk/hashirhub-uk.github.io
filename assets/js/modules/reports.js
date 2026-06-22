@@ -454,7 +454,7 @@ Router.register("report-customer-statement", (m) => reportScreen(m, {
     <select id="rpt-customer"><option value="">Select a customer…</option></select></label>`,
   gatherExtra(mount) { return { customer_id: mount.querySelector("#rpt-customer").value }; },
   async init(mount) {
-    const custs = await API.list("customers");
+    const custs = await API.list("Customers");
     const sel = mount.querySelector("#rpt-customer");
     custs.forEach(c => sel.add(new Option(c.name, c.id)));
   },
@@ -542,7 +542,7 @@ Router.register("report-supplier-statement", (m) => reportScreen(m, {
     <select id="rpt-supplier"><option value="">Select a supplier…</option></select></label>`,
   gatherExtra(mount) { return { supplier_id: mount.querySelector("#rpt-supplier").value }; },
   async init(mount) {
-    const supps = await API.list("suppliers");
+    const supps = await API.list("Suppliers");
     const sel = mount.querySelector("#rpt-supplier");
     supps.forEach(s => sel.add(new Option(s.name, s.id)));
   },
@@ -638,7 +638,7 @@ async function invFilters(mount, opts) {
   let warehouses = [], categories = [], suppliers = [];
   try { warehouses = await API.list("warehouses"); } catch(e){}
   try { categories = await API.list("categories"); } catch(e){}
-  if (opts.vendors) { try { suppliers = await API.list("suppliers"); } catch(e){} }
+  if (opts.vendors) { try { suppliers = await API.list("Suppliers"); } catch(e){} }
   const whOpts = `<option value="">All Warehouses</option>${warehouses.map(w=>`<option value="${UI.escape(String(w.id))}">${UI.escape(w.warehouse_name)}</option>`).join("")}`;
   const catOpts = `<option value="">All Categories</option>${categories.map(c=>`<option value="${UI.escape(String(c.id))}">${UI.escape(c.name)}</option>`).join("")}`;
   const suppOpts = opts.vendors ? `<option value="">All Suppliers</option>${suppliers.map(s=>`<option value="${UI.escape(String(s.id))}">${UI.escape(s.name)}</option>`).join("")}` : "";

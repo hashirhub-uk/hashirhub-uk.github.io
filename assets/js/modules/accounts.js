@@ -151,10 +151,34 @@ Router.register('general-journal', async (mount) => {
 
 Router.register('new-general-journal-entry', async (mount) => {
   UI.loading(true);
-  try { await Accounts.load(); } catch (e) { UI.loading(false); acctErr(mount, 'journal entry', e.message); return; }
+  let customers = [], suppliers = [];
+  try {
+    await Accounts.load();
+    [customers, suppliers] = await Promise.all([
+      API.list('Customers'),
+      API.list('Suppliers')
+    ]);
+  } catch (e) { UI.loading(false); acctErr(mount, 'journal entry', e.message); return; }
   UI.loading(false);
   const state = { date: new Date().toISOString().slice(0, 10), memo: '', lines: [blankJL(), blankJL()] };
   function blankJL() { return { account_id: '', debit: '', credit: '', name: '', memo: '' }; }
+
+  // Render the name cell based on account's system_key
+  function nameCell(l, i) {
+    const acct = l.account_id ? Accounts.byId(l.account_id) : null;
+    const key = acct ? (acct.system_key || '') : '';
+    if (key === 'ap') {
+      const opts = `<option value="">— Select supplier —</option>` +
+        suppliers.map(s => `<option value="${UI.escape(s.name)}"${s.name === l.name ? ' selected' : ''}>${UI.escape(s.name)}</option>`).join('');
+      return `<select class="jl-name" data-i="${i}">${opts}</select>`;
+    } else if (key === 'ar') {
+      const opts = `<option value="">— Select customer —</option>` +
+        customers.map(c => `<option value="${UI.escape(c.name)}"${c.name === l.name ? ' selected' : ''}>${UI.escape(c.name)}</option>`).join('');
+      return `<select class="jl-name" data-i="${i}">${opts}</select>`;
+    } else {
+      return `<input class="jl-name" data-i="${i}" value="${UI.escape(l.name)}" placeholder="Name">`;
+    }
+  }
 
   mount.innerHTML = `
     <div class="page-head"><h1>General Journal Entry</h1>
@@ -164,7 +188,7 @@ Router.register('new-general-journal-entry', async (mount) => {
       <label class="field field--wide"><span class="field-label">Memo</span><input id="je-memo"></label>
     </div></div>
     <div class="card no-pad"><div class="table-wrap"><table class="data-table line-table">
-      <thead><tr><th style="min-width:200px;">Account</th><th class="num">Debit</th><th class="num">Credit</th><th>Name</th><th>Memo</th><th class="actions"></th></tr></thead>
+      <thead><tr><th style="min-width:200px;">Account</th><th class="num">Debit</th><th class="num">Credit</th><th style="min-width:180px">Name</th><th>Memo</th><th class="actions"></th></tr></thead>
       <tbody id="je-lines"></tbody>
       <tfoot><tr><th>Totals</th><th class="num" id="je-totDr">0.00</th><th class="num" id="je-totCr">0.00</th><th colspan="3" id="je-balmsg"></th></tr></tfoot>
     </table></div><div class="line-add"><button class="btn" id="je-add">+ Add line</button></div></div>`;
@@ -175,27 +199,62 @@ Router.register('new-general-journal-entry', async (mount) => {
     state.lines.forEach(l => { dr += Number(l.debit || 0); cr += Number(l.credit || 0); });
     mount.querySelector('#je-totDr').textContent = UI.money(dr);
     mount.querySelector('#je-totCr').textContent = UI.money(cr);
-    mount.querySelector('#je-balmsg').innerHTML = Math.abs(dr - cr) < 0.01 ? '<span class="badge badge--ok">BALANCED</span>' : '<span class="badge badge--bad">OUT BY ' + UI.money(Math.abs(dr - cr)) + '</span>';
+    mount.querySelector('#je-balmsg').innerHTML = Math.abs(dr - cr) < 0.01
+      ? '<span class="badge badge--ok">BALANCED</span>'
+      : '<span class="badge badge--bad">OUT BY ' + UI.money(Math.abs(dr - cr)) + '</span>';
   };
+
+  const wireRow = (tr) => {
+    const i = Number(tr.dataset.i);
+    const acctSel = tr.querySelector('.jl-acct');
+    acctSel.onchange = e => {
+      state.lines[i].account_id = e.target.value;
+      state.lines[i].name = ''; // reset name when account changes
+      // swap the name cell in-place without re-rendering the whole table
+      const td = tr.querySelector('td:nth-child(4)');
+      td.innerHTML = nameCell(state.lines[i], i);
+      wireNameCell(tr, i);
+    };
+    tr.querySelector('.jl-dr').oninput = e => {
+      state.lines[i].debit = e.target.value;
+      if (e.target.value) { state.lines[i].credit = ''; tr.querySelector('.jl-cr').value = ''; }
+      recompute();
+    };
+    tr.querySelector('.jl-cr').oninput = e => {
+      state.lines[i].credit = e.target.value;
+      if (e.target.value) { state.lines[i].debit = ''; tr.querySelector('.jl-dr').value = ''; }
+      recompute();
+    };
+    wireNameCell(tr, i);
+    tr.querySelector('.jl-memo').oninput = e => state.lines[i].memo = e.target.value;
+    tr.querySelector('.jl-del').onclick = () => {
+      if (state.lines.length <= 2) { state.lines[i] = blankJL(); } else { state.lines.splice(i, 1); }
+      render();
+    };
+  };
+
+  const wireNameCell = (tr, i) => {
+    const el = tr.querySelector('.jl-name');
+    if (!el) return;
+    if (el.tagName === 'SELECT') {
+      el.onchange = e => { state.lines[i].name = e.target.value; };
+    } else {
+      el.oninput = e => { state.lines[i].name = e.target.value; };
+    }
+  };
+
   const render = () => {
     linesEl.innerHTML = state.lines.map((l, i) => `<tr data-i="${i}">
       <td><select class="jl-acct">${Accounts.options(l.account_id)}</select></td>
       <td><input class="jl-dr num" type="number" step="0.01" value="${UI.escape(l.debit)}"></td>
       <td><input class="jl-cr num" type="number" step="0.01" value="${UI.escape(l.credit)}"></td>
-      <td><input class="jl-name" value="${UI.escape(l.name)}"></td>
+      <td>${nameCell(l, i)}</td>
       <td><input class="jl-memo" value="${UI.escape(l.memo)}"></td>
       <td class="actions"><button class="link-btn link-btn--danger jl-del">✕</button></td></tr>`).join('');
-    linesEl.querySelectorAll('tr').forEach(tr => {
-      const i = Number(tr.dataset.i);
-      tr.querySelector('.jl-acct').onchange = e => state.lines[i].account_id = e.target.value;
-      tr.querySelector('.jl-dr').oninput = e => { state.lines[i].debit = e.target.value; if (e.target.value) { state.lines[i].credit = ''; tr.querySelector('.jl-cr').value = ''; } recompute(); };
-      tr.querySelector('.jl-cr').oninput = e => { state.lines[i].credit = e.target.value; if (e.target.value) { state.lines[i].debit = ''; tr.querySelector('.jl-dr').value = ''; } recompute(); };
-      tr.querySelector('.jl-name').oninput = e => state.lines[i].name = e.target.value;
-      tr.querySelector('.jl-memo').oninput = e => state.lines[i].memo = e.target.value;
-      tr.querySelector('.jl-del').onclick = () => { if (state.lines.length <= 2) { state.lines[i] = blankJL(); } else { state.lines.splice(i, 1); } render(); };
-    });
+    linesEl.querySelectorAll('tr').forEach(tr => wireRow(tr));
     recompute();
   };
+
   render();
   mount.querySelector('#je-add').onclick = () => { state.lines.push(blankJL()); render(); };
   mount.querySelector('#je-date').onchange = e => state.date = e.target.value;
@@ -207,8 +266,10 @@ Router.register('new-general-journal-entry', async (mount) => {
     let dr = 0, cr = 0; lines.forEach(l => { dr += Number(l.debit || 0); cr += Number(l.credit || 0); });
     if (Math.abs(dr - cr) > 0.01) { UI.toast('Debits must equal credits.', 'error'); return; }
     UI.loading(true, 'Posting…');
-    try { await API.call('createJournalEntry', { data: { date: state.date, memo: state.memo, lines } }); UI.loading(false); UI.toast('Entry posted.', 'success'); Router.go('general-journal'); }
-    catch (e) { UI.loading(false); UI.toast(e.message, 'error'); }
+    try {
+      await API.call('createJournalEntry', { data: { date: state.date, memo: state.memo, lines } });
+      UI.loading(false); UI.toast('Entry posted.', 'success'); Router.go('general-journal');
+    } catch (e) { UI.loading(false); UI.toast(e.message, 'error'); }
   };
 });
 
