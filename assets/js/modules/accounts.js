@@ -412,7 +412,7 @@ Router.register('show-undeposited-list', async (mount) => {
   let undeposited;
   try { await Accounts.load(); undeposited = await API.call('undepositedList'); } catch (e) { UI.loading(false); acctErr(mount, 'deposits', e.message); return; }
   UI.loading(false);
-  const bankOpts = Accounts.list.filter(a => a.account_type === 'Bank').map(a => `<option value="${UI.escape(a.id)}">${UI.escape(a.account_name)}</option>`).join('');
+  const bankOpts = Accounts.list.filter(a => a.system_key !== 'undeposited' && a.is_active !== 'No').map(a => `<option value="${UI.escape(a.id)}">${UI.escape(a.account_name)} (${UI.escape(a.account_type)})</option>`).join('');
 
   if (!undeposited.length) {
     mount.innerHTML = `${paymentTabs('show-undeposited-list')}<div class="page-head"><h1>Payments to Deposit</h1></div><div class="card"><div class="empty">${UI.icon('check')}<h3>No payments to deposit</h3><p>Recorded customer payments awaiting deposit appear here.</p></div></div>`;
@@ -542,7 +542,7 @@ Router.register('check-register', async (mount) => {
   UI.loading(true);
   try { await Accounts.load(); } catch (e) { UI.loading(false); acctErr(mount, 'check register', e.message); return; }
   UI.loading(false);
-  const bankOpts = Accounts.list.filter(a => a.account_type === 'Bank').map(a => `<option value="${UI.escape(a.id)}">${UI.escape(a.account_name)}</option>`).join('');
+  const bankOpts = Accounts.list.filter(a => a.system_key !== 'undeposited' && a.is_active !== 'No').map(a => `<option value="${UI.escape(a.id)}">${UI.escape(a.account_name)} (${UI.escape(a.account_type)})</option>`).join('');
   mount.innerHTML = `
     <div class="page-head"><h1>Check Register</h1></div>
     <div class="card"><div class="form-grid">

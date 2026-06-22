@@ -161,7 +161,9 @@ function reportScreen(mount, cfg) {
     try {
       const data = await API.call(cfg.action, Object.assign({ from, to }, extra));
       mount.querySelector("#rpt-print").style.display = "";
-      mount.querySelector("#rpt-out").innerHTML = cfg.render(data, { from, to, co, extra });
+      const html = cfg.render(data, { from, to, co, extra });
+      mount.querySelector("#rpt-out").innerHTML = html;
+      if (cfg.afterRender) cfg.afterRender(mount, data, { from, to, co, extra });
     } catch(e) { UI.toast(e.message, "error"); }
     UI.loading(false);
   }
@@ -176,37 +178,92 @@ function reportScreen(mount, cfg) {
 Router.register("report-pl", (m) => reportScreen(m, {
   title: "Profit and Loss Standard", action: "reportProfitLoss", mode: "range",
   render(data, {from, to, co}) {
-    const section = (label, sec) => sec && sec.lines && sec.lines.length ? `
-      <tr class="rpt-section"><td colspan="2">${UI.escape(label)}</td></tr>
-      ${sec.lines.map(r=>`<tr><td style="padding-left:28px">${UI.escape(r.account)}</td><td class="num">${UI.money(r.amount)}</td></tr>`).join("")}
-      <tr class="rpt-subtotal"><td>Total ${UI.escape(label)}</td><td class="num">${UI.money(sec.total)}</td></tr>` : "";
+    const drill = (id, label) => id
+      ? `<a class="pl-link" data-id="${UI.escape(id)}" data-from="${UI.escape(from)}" data-to="${UI.escape(to)}" style="color:var(--accent);cursor:pointer;text-decoration:none">${UI.escape(label)}</a>`
+      : UI.escape(label);
+
+    const section = (label, sec) => {
+      if (!sec || !sec.lines) return '';
+      return `
+        <tr class="rpt-section"><td colspan="2"><strong>${UI.escape(label)}</strong></td></tr>
+        ${sec.lines.map(r => `<tr class="pl-row"><td style="padding-left:28px">${drill(r.id, r.account)}</td>
+          <td class="num" style="${r.amount !== 0 ? '' : 'color:#94a3b8'}">${UI.money(r.amount)}</td></tr>`).join('')}
+        <tr class="rpt-subtotal"><td>Total ${UI.escape(label)}</td><td class="num">${UI.money(sec.total)}</td></tr>`;
+    };
+
     return `<div class="card report-doc no-print-card">
-      <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
+      <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||'')}</div>
         <div class="report-title">Profit and Loss Standard</div>
-        <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
-      <table class="data-table report-table" style="max-width:520px;margin:auto">
+        <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div>
+        <div class="report-sub" style="font-size:11px;color:#94a3b8;margin-top:2px">Click any account name to see its transactions</div>
+      </div>
+      <table class="data-table report-table" style="max-width:600px;margin:auto">
         <thead><tr><th>Account</th><th class="num">Amount</th></tr></thead>
         <tbody>
-          ${section("Income", data.income)}
-          ${section("Cost of Goods Sold", data.cogs)}
+          <tr class="rpt-section"><td colspan="2">Ordinary Income/Expense</td></tr>
+          <tr class="rpt-section"><td style="padding-left:14px"><em>Income</em></td><td></td></tr>
+          ${section('', data.income).replace('<tr class="rpt-section"><td colspan="2"><strong></strong></td></tr>', '')}
+          <tr class="rpt-section"><td style="padding-left:14px"><em>Cost of Goods Sold</em></td><td></td></tr>
+          ${section('', data.cogs).replace('<tr class="rpt-section"><td colspan="2"><strong></strong></td></tr>', '')}
           <tr class="rpt-total"><td><strong>Gross Profit</strong></td><td class="num"><strong>${UI.money(data.gross_profit||0)}</strong></td></tr>
-          ${section("Expenses", data.expense)}
+          <tr class="rpt-section"><td style="padding-left:14px"><em>Expenses</em></td><td></td></tr>
+          ${section('', data.expense).replace('<tr class="rpt-section"><td colspan="2"><strong></strong></td></tr>', '')}
+          <tr class="rpt-total"><td>Net Ordinary Income</td><td class="num">${UI.money(data.net_income||0)}</td></tr>
           <tr class="rpt-grand"><td><strong>Net Income</strong></td><td class="num"><strong>${UI.money(data.net_income||0)}</strong></td></tr>
         </tbody>
-      </table></div>`;
+      </table>
+      <div id="pl-drilldown" style="margin-top:24px"></div>
+    </div>`;
+  },
+  afterRender(mount, data, ctx) {
+    mount.querySelectorAll('.pl-link').forEach(a => {
+      a.onclick = async () => {
+        const panel = mount.querySelector('#pl-drilldown');
+        const name = a.textContent;
+        panel.innerHTML = `<div class="empty"><p>Loading ${UI.escape(name)} transactions…</p></div>`;
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        try {
+          const d = await API.call('accountDrilldown', { account_id: a.dataset.id, from: a.dataset.from, to: a.dataset.to });
+          panel.innerHTML = `<div class="card no-print-card">
+            <div class="card-head"><h2>${UI.escape(d.account)}</h2>
+              <span class="page-sub">${UI.date(d.from)} — ${UI.date(d.to)}</span></div>
+            <div class="table-wrap"><table class="data-table report-table">
+              <thead><tr><th>Type</th><th>Date</th><th>Num</th><th>Name</th><th>Memo</th>
+                <th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
+              <tbody>
+                <tr class="rpt-subtotal"><td colspan="7">Opening Balance</td><td class="num">${UI.money(d.opening)}</td></tr>
+                ${d.lines.map(r => `<tr>
+                  <td>${UI.escape(r.type)}</td><td>${UI.escape(UI.date(r.date))}</td>
+                  <td>${UI.escape(r.number)}</td><td>${UI.escape(r.name)}</td><td>${UI.escape(r.memo)}</td>
+                  <td class="num">${r.debit ? UI.money(r.debit) : ''}</td>
+                  <td class="num">${r.credit ? UI.money(r.credit) : ''}</td>
+                  <td class="num">${UI.money(r.balance)}</td>
+                </tr>`).join('')}
+                ${!d.lines.length ? `<tr><td colspan="8" style="text-align:center;padding:20px;color:#94a3b8">No transactions in this period.</td></tr>` : ''}
+                <tr class="rpt-grand"><td colspan="7"><strong>Closing Balance</strong></td><td class="num"><strong>${UI.money(d.closing)}</strong></td></tr>
+              </tbody>
+            </table></div></div>`;
+        } catch(e) { panel.innerHTML = `<div class="card"><div class="empty"><p>${UI.escape(e.message)}</p></div></div>`; }
+      };
+    });
   }
 }));
 
 Router.register("report-balance-sheet", (m) => reportScreen(m, {
   title: "Balance Sheet Standard", action: "reportBalanceSheet", mode: "asof",
   render(data, {to, co}) {
+    const drill = (id, label) => id
+      ? `<a class="bs-link" data-id="${UI.escape(id)}" data-to="${UI.escape(to)}" style="color:var(--accent);cursor:pointer">${UI.escape(label)}</a>`
+      : UI.escape(label);
     const section = (label, sec) => sec && sec.lines && sec.lines.length ? `
       <tr class="rpt-section"><td colspan="2">${UI.escape(label)}</td></tr>
-      ${sec.lines.map(r=>`<tr><td style="padding-left:28px">${UI.escape(r.account)}</td><td class="num">${UI.money(r.amount)}</td></tr>`).join("")}
-      <tr class="rpt-subtotal"><td>Total ${UI.escape(label)}</td><td class="num">${UI.money(sec.total)}</td></tr>` : "";
+      ${sec.lines.map(r=>`<tr><td style="padding-left:28px">${drill(r.id, r.account)}</td><td class="num" style="${r.amount===0?'color:#94a3b8':''}">${UI.money(r.amount)}</td></tr>`).join('')}
+      <tr class="rpt-subtotal"><td>Total ${UI.escape(label)}</td><td class="num">${UI.money(sec.total)}</td></tr>` : '';
     return `<div class="card report-doc no-print-card">
-      <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
-        <div class="report-title">Balance Sheet</div><div class="report-period">As of ${UI.date(to)}</div></div>
+      <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||'')}</div>
+        <div class="report-title">Balance Sheet</div><div class="report-period">As of ${UI.date(to)}</div>
+        <div class="report-sub" style="font-size:11px;color:#94a3b8;margin-top:2px">Click any account name to see its transactions</div>
+      </div>
       <table class="data-table report-table" style="max-width:520px;margin:auto">
         <thead><tr><th>Account</th><th class="num">Balance</th></tr></thead>
         <tbody>
@@ -221,7 +278,37 @@ Router.register("report-balance-sheet", (m) => reportScreen(m, {
           ${section("Equity", data.equity)}
           <tr class="rpt-grand"><td><strong>Total Liabilities &amp; Equity</strong></td><td class="num"><strong>${UI.money(data.total_liab_equity||0)}</strong></td></tr>
         </tbody>
-      </table></div>`;
+      </table>
+      <div id="bs-drilldown" style="margin-top:24px"></div>
+    </div>`;
+  },
+  afterRender(mount, data, ctx) {
+    mount.querySelectorAll('.bs-link').forEach(a => {
+      a.onclick = async () => {
+        const panel = mount.querySelector('#bs-drilldown');
+        panel.innerHTML = `<div class="empty"><p>Loading ${UI.escape(a.textContent)} transactions…</p></div>`;
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        try {
+          const d = await API.call('accountDrilldown', { account_id: a.dataset.id, to: a.dataset.to });
+          panel.innerHTML = `<div class="card no-print-card">
+            <div class="card-head"><h2>${UI.escape(d.account)}</h2>
+              <span class="page-sub">As of ${UI.date(ctx.to)}</span></div>
+            <div class="table-wrap"><table class="data-table report-table">
+              <thead><tr><th>Type</th><th>Date</th><th>Num</th><th>Name</th><th>Memo</th>
+                <th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
+              <tbody>
+                ${d.lines.map(r=>`<tr>
+                  <td>${UI.escape(r.type)}</td><td>${UI.escape(UI.date(r.date))}</td>
+                  <td>${UI.escape(r.number)}</td><td>${UI.escape(r.name)}</td><td>${UI.escape(r.memo)}</td>
+                  <td class="num">${r.debit?UI.money(r.debit):''}</td>
+                  <td class="num">${r.credit?UI.money(r.credit):''}</td>
+                  <td class="num">${UI.money(r.balance)}</td></tr>`).join('')}
+                ${!d.lines.length?`<tr><td colspan="8" style="text-align:center;padding:20px;color:#94a3b8">No transactions found.</td></tr>`:''}
+                <tr class="rpt-grand"><td colspan="7"><strong>Balance</strong></td><td class="num"><strong>${UI.money(d.closing)}</strong></td></tr>
+              </tbody></table></div></div>`;
+        } catch(e) { panel.innerHTML = `<div class="card"><div class="empty"><p>${UI.escape(e.message)}</p></div></div>`; }
+      };
+    });
   }
 }));
 
@@ -286,21 +373,59 @@ Router.register("report-transactions-summary", (m) => reportScreen(m, {
    =================================================================== */
 Router.register("report-customer-balances", (m) => reportScreen(m, {
   title: "Customer Balance Summary", action: "reportCustomerBalances", mode: "asof",
-  render(data, {to, co}) {
+  render(data, {from, to, co}) {
     return `<div class="card report-doc no-print-card">
-      <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
-        <div class="report-title">Customer Balance Summary</div><div class="report-period">As of ${UI.date(to)}</div></div>
+      <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||'')}</div>
+        <div class="report-title">Customer Balance Summary</div><div class="report-period">As of ${UI.date(to)}</div>
+        <div class="report-sub" style="font-size:11px;color:#94a3b8;margin-top:2px">Click a customer name to see their invoices</div>
+      </div>
       <table class="data-table report-table">
         <thead><tr><th>Customer</th><th class="num">Invoiced</th><th class="num">Paid</th><th class="num">Balance</th></tr></thead>
         <tbody>
-          ${(data.lines||[]).map(r=>`<tr><td>${UI.escape(r.customer)}</td><td class="num">${UI.money(r.invoiced)}</td>
-            <td class="num">${UI.money(r.paid)}</td><td class="num">${UI.money(r.balance)}</td></tr>`).join("")}
-          ${!(data.lines||[]).length?`<tr><td colspan="4" style="text-align:center;padding:28px">No customer balances found.</td></tr>`:""}
+          ${(data.lines||[]).map(r=>`<tr><td>
+            <a class="cust-drill" data-id="${UI.escape(r.customer_id)}" data-from="${UI.escape(from||'')}" data-to="${UI.escape(to||'')}" style="color:var(--accent);cursor:pointer">${UI.escape(r.customer)}</a>
+          </td><td class="num">${UI.money(r.invoiced)}</td>
+            <td class="num">${UI.money(r.paid)}</td><td class="num" style="${r.balance>0?'color:var(--bad)':''}">${UI.money(r.balance)}</td></tr>`).join('')}
+          ${!(data.lines||[]).length?`<tr><td colspan="4" style="text-align:center;padding:28px">No customer balances found.</td></tr>`:''}
           <tr class="rpt-grand"><td><strong>Total</strong></td><td class="num"><strong>${UI.money(data.total_invoiced||0)}</strong></td>
             <td class="num"><strong>${UI.money(data.total_paid||0)}</strong></td>
             <td class="num"><strong>${UI.money(data.total_balance||0)}</strong></td></tr>
         </tbody>
-      </table></div>`;
+      </table>
+      <div id="cust-drill-panel" style="margin-top:24px"></div>
+    </div>`;
+  },
+  afterRender(mount, data, ctx) {
+    mount.querySelectorAll('.cust-drill').forEach(a => {
+      a.onclick = async () => {
+        const panel = mount.querySelector('#cust-drill-panel');
+        panel.innerHTML = `<div class="empty"><p>Loading invoices for ${UI.escape(a.textContent)}…</p></div>`;
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        try {
+          const d = await API.call('customerDrilldown', { customer_id: a.dataset.id, from: a.dataset.from, to: a.dataset.to });
+          const statusBadge = s => s==='paid'?'<span class="badge badge--ok">Paid</span>':s==='partial'?'<span class="badge badge--warn">Partial</span>':'<span class="badge badge--bad">Open</span>';
+          panel.innerHTML = `<div class="card no-print-card">
+            <div class="card-head"><h2>${UI.escape(d.customer)}</h2>
+              <span class="page-sub">Invoices${ctx.from ? ' from '+UI.date(ctx.from) : ''} to ${UI.date(ctx.to)}</span></div>
+            <div class="table-wrap"><table class="data-table report-table">
+              <thead><tr><th>Invoice No.</th><th>Date</th><th class="num">Total</th>
+                <th class="num">Paid</th><th class="num">Balance</th><th>Status</th></tr></thead>
+              <tbody>
+                ${d.invoices.map(r=>`<tr>
+                  <td>${UI.escape(r.invoice_no)}</td><td>${UI.escape(UI.date(r.date))}</td>
+                  <td class="num">${UI.money(r.total)}</td><td class="num">${UI.money(r.paid)}</td>
+                  <td class="num" style="${r.balance>0?'color:var(--bad)':''}">${UI.money(r.balance)}</td>
+                  <td>${statusBadge(r.status)}</td></tr>`).join('')}
+                ${!d.invoices.length?`<tr><td colspan="6" style="text-align:center;padding:20px;color:#94a3b8">No invoices in this period.</td></tr>`:''}
+                <tr class="rpt-grand"><td colspan="2"><strong>Total</strong></td>
+                  <td class="num"><strong>${UI.money(d.total_invoiced)}</strong></td>
+                  <td class="num"><strong>${UI.money(d.total_paid)}</strong></td>
+                  <td class="num" style="${d.total_balance>0?'color:var(--bad)':''}"><strong>${UI.money(d.total_balance)}</strong></td>
+                  <td></td></tr>
+              </tbody></table></div></div>`;
+        } catch(e) { panel.innerHTML = `<div class="card"><div class="empty"><p>${UI.escape(e.message)}</p></div></div>`; }
+      };
+    });
   }
 }));
 

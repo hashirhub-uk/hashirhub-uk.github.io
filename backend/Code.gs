@@ -259,6 +259,8 @@ function handle_(e) {
       case 'reportInvoiceBatchPrint':    return out_({ ok: true, data: reportInvoiceBatchPrint_(p) });
       case 'reportCustomersItemsSales':  return out_({ ok: true, data: reportCustomersItemsSales_(p) });
       case 'invoiceHistory':             return out_({ ok: true, data: invoiceHistory_(p) });
+      case 'accountDrilldown':           return out_({ ok: true, data: accountDrilldown_(p) });
+      case 'customerDrilldown':          return out_({ ok: true, data: customerDrilldown_(p) });
       case 'reportCustomerDiscounts':    return out_({ ok: true, data: reportCustomerDiscounts_(p) });
       case 'reportItemDiscounts':        return out_({ ok: true, data: reportItemDiscounts_(p) });
       case 'reportSalesOrdersSummary':   return out_({ ok: true, data: reportSalesOrdersSummary_(p) });
@@ -1776,14 +1778,15 @@ function balancesByAccount_(fromKey, toKey) {
   return bal;
 }
 // sign: 'debit' => amount = raw ; 'credit' => amount = -raw
-function rptSection_(bal, types, sign) {
+// includeZero: when true shows all accounts even at 0 (needed for P&L display)
+function rptSection_(bal, types, sign, includeZero) {
   var lines = [], total = 0;
   rows_('Accounts').forEach(function (a) {
     if (types.indexOf(a.account_type) === -1) return;
     var raw = bal[String(a.id)] || 0;
     var amt = sign === 'credit' ? -raw : raw;
-    if (Math.abs(amt) < 0.005) return;
-    lines.push({ account: a.account_name, amount: amt });
+    if (!includeZero && Math.abs(amt) < 0.005) return;
+    lines.push({ id: String(a.id), account: a.account_name, amount: amt });
     total += amt;
   });
   return { lines: lines, total: total };
@@ -1807,9 +1810,9 @@ function reportTrialBalance_(p) {
 function plData_(from, to) {
   var f = from ? dayKey_(from) : null, t = to ? dayKey_(to) : null;
   var bal = balancesByAccount_(f, t);
-  var income = rptSection_(bal, RPT_INCOME, 'credit');
-  var cogs = rptSection_(bal, RPT_COGS, 'debit');
-  var expense = rptSection_(bal, RPT_EXPENSE, 'debit');
+  var income  = rptSection_(bal, RPT_INCOME,  'credit', true);
+  var cogs    = rptSection_(bal, RPT_COGS,    'debit',  true);
+  var expense = rptSection_(bal, RPT_EXPENSE, 'debit',  true);
   var gross = income.total - cogs.total;
   return { from: f, to: t, income: income, cogs: cogs, gross_profit: gross, expense: expense, net_income: gross - expense.total };
 }
@@ -1893,14 +1896,18 @@ function inRange_(k, f, t) { if (f && k < f) return false; if (t && k > t) retur
 
 function reportCustomerBalances_(p) {
   var f = p.from ? dayKey_(p.from) : null, t = p.to ? dayKey_(p.to) : null;
-  var cust = nameMap_('Customers'), agg = {};
+  var custs = {}, custIds = {};
+  list_('Customers', {}).forEach(function (c) { custs[String(c.id)] = c.name; custIds[c.name] = String(c.id); });
+  var agg = {};
   list_('Invoices', {}).forEach(function (r) {
     if (!inRange_(dayKey_(r.date), f, t)) return;
-    var name = cust[String(r.customer_id)] || '—';
-    var a = agg[name] || (agg[name] = { invoiced: 0, balance: 0 });
+    var cid = String(r.customer_id);
+    var name = custs[cid] || '—';
+    var a = agg[cid] || (agg[cid] = { customer: name, customer_id: cid, invoiced: 0, balance: 0 });
     a.invoiced += Number(r.total || 0); a.balance += Number(r.balance || 0);
   });
-  var lines = Object.keys(agg).map(function (k) { var a = agg[k]; return { customer: k, invoiced: a.invoiced, paid: a.invoiced - a.balance, balance: a.balance }; }).sort(function (a, b) { return b.balance - a.balance; });
+  var lines = Object.values(agg).map(function (a) { return { customer_id: a.customer_id, customer: a.customer, invoiced: a.invoiced, paid: a.invoiced - a.balance, balance: a.balance }; })
+    .sort(function (a, b) { return b.balance - a.balance; });
   return { from: f, to: t, lines: lines,
     total_invoiced: lines.reduce(function (s, l) { return s + l.invoiced; }, 0),
     total_paid: lines.reduce(function (s, l) { return s + l.paid; }, 0),
@@ -2756,4 +2763,114 @@ function resetCounterValue_(name, val) {
   for (var i = 1; i < values.length; i++) {
     if (String(values[i][0]) === name) { sh.getRange(i + 1, 2).setValue(val); return; }
   }
+}
+
+// =====================================================================
+//  ACCOUNT DRILLDOWN  — journal entries for one account in a period
+//  Called when user clicks an account name in P&L or Balance Sheet
+// =====================================================================
+function accountDrilldown_(p) {
+  var acctId = String(p.account_id || '');
+  var f = p.from ? dayKey_(p.from) : null;
+  var t = p.to   ? dayKey_(p.to)   : null;
+  if (!acctId) throw new Error('account_id required');
+  var acct = get_('Accounts', acctId);
+  if (!acct) throw new Error('Account not found.');
+  var custs = {}; rows_('Customers').forEach(function(c){ custs[String(c.id)] = c.name; });
+  var supps = {}; rows_('Suppliers').forEach(function(s){ supps[String(s.id)] = s.name; });
+  var running = 0;
+  // opening balance = sum of journal for this account BEFORE from date
+  if (f) {
+    rows_('Journal').forEach(function(r) {
+      if (String(r.account_id) !== acctId) return;
+      if (dayKey_(r.date) >= f) return;
+      running += Number(r.debit||0) - Number(r.credit||0);
+    });
+  }
+  var opening = running;
+  var lines = [];
+  rows_('Journal').filter(function(r) {
+    if (String(r.account_id) !== acctId) return false;
+    var d = dayKey_(r.date);
+    return (!f || d >= f) && (!t || d <= t);
+  }).sort(function(a,b){ return dayKey_(a.date) < dayKey_(b.date) ? -1 : 1; })
+  .forEach(function(r) {
+    var dr = Number(r.debit||0), cr = Number(r.credit||0);
+    running += dr - cr;
+    var name = r.name || '';
+    if (!name && r.source_type === 'invoice')  name = custs[String(r.source_id)] || '';
+    if (!name && r.source_type === 'receipt')  name = custs[String(r.source_id)] || '';
+    if (!name && r.source_type === 'bill')     name = supps[String(r.source_id)] || '';
+    lines.push({
+      type:    r.source_type || '', date: r.date || '',
+      number:  r.entry_no || '', name: name,
+      memo:    r.memo || '', debit: dr, credit: cr, balance: running
+    });
+  });
+  return { account: acct.account_name, type: acct.account_type, from: f, to: t,
+           opening: opening, lines: lines, closing: running };
+}
+
+// =====================================================================
+//  CUSTOMER DRILLDOWN  — invoices for one customer in a period
+//  Called when user clicks a customer row in Customer Balance Summary
+// =====================================================================
+function customerDrilldown_(p) {
+  var custId = String(p.customer_id || '');
+  var f = p.from ? dayKey_(p.from) : null;
+  var t = p.to   ? dayKey_(p.to)   : null;
+  if (!custId) throw new Error('customer_id required');
+  var c = get_('Customers', custId);
+  if (!c) throw new Error('Customer not found.');
+  var invoices = list_('Invoices', {}).filter(function(r) {
+    if (String(r.customer_id) !== custId) return false;
+    var d = dayKey_(r.date);
+    return (!f || d >= f) && (!t || d <= t);
+  }).map(function(r) {
+    return { invoice_no: r.invoice_no, date: r.date, total: Number(r.total||0),
+             paid: Number(r.paid||0), balance: Number(r.balance||0), status: r.status||'' };
+  }).sort(function(a,b){ return dayKey_(a.date) < dayKey_(b.date) ? -1 : 1; });
+  return { customer: c.name, from: f, to: t, invoices: invoices,
+           total_invoiced: invoices.reduce(function(s,r){return s+r.total;},0),
+           total_paid:     invoices.reduce(function(s,r){return s+r.paid;},0),
+           total_balance:  invoices.reduce(function(s,r){return s+r.balance;},0) };
+}
+
+// =====================================================================
+//  COMPREHENSIVE RESET — clears ALL transaction data, financial ledger,
+//  and stock history. Keeps: Settings, Users, Categories, Brands, UOM,
+//  TaxTypes, Areas, SalesRepresentatives, Stores, Warehouses, PriceLists,
+//  Items, Customers, Suppliers, Accounts.
+//  Resets ALL counters to 0.
+//  Run from the Apps Script editor only — NOT exposed via the API.
+// =====================================================================
+function resetAllTransactions() {
+  var TRANSACTION_TABLES = [
+    'PurchaseOrders', 'PurchaseOrderItems',
+    'Bills', 'BillItems',
+    'SalesOrders', 'SalesOrderItems',
+    'Quotations', 'QuotationItems',
+    'CreditMemos', 'CreditMemoItems',
+    'Expenses', 'ExpenseItems',
+    'InventoryTransfers', 'InventoryTransferItems',
+    'InventoryAdjustments', 'InventoryAdjustmentItems',
+    'Claims', 'ClaimItems',
+    'Invoices', 'InvoiceItems',
+    'SalesReceipts', 'SalesReceiptItems',
+    'Payments',
+    'Deposits',
+    'FundTransfers',
+    'Journal',
+    'StockMovements'
+  ];
+  TRANSACTION_TABLES.forEach(function(t) {
+    try { clearSheetData_(t); } catch(e) { Logger.log('Skipped ' + t + ': ' + e.message); }
+  });
+  // reset every counter to 0
+  var sh = sheet_('Counters');
+  var vals = sh.getDataRange().getValues();
+  for (var i = 1; i < vals.length; i++) {
+    sh.getRange(i + 1, 2).setValue(0);
+  }
+  Logger.log('Done. All transactions, ledger entries, and stock history cleared. Counters reset to 0. Settings, Chart of Accounts, Items, Customers, Suppliers, and all reference data are untouched.');
 }
