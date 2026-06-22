@@ -1223,16 +1223,36 @@ function writeBillLines_(billId, billNo, lines, dateStr, billType) {
       discount: ln.discount || '', line_total: Number(ln.line_total || 0)
     });
     if (ln.item_id) {
+      var receivedQty = Number(ln.qty || 0) * Number(ln.multiplier || 1);
+      var newCost    = Number(ln.cost || 0);
+
+      // read qty BEFORE adding the incoming movement so WAC uses the correct
+      // "units already in stock" figure
+      var currentQty  = onHand_(ln.item_id);
+      var it          = get_('Items', ln.item_id);
+      var currentCost = Number((it && it.cost_price) || 0);
+
       create_('StockMovements', {
         date: dateStr || new Date().toISOString().slice(0, 10), item_id: ln.item_id,
         type: billType === 'Credit' ? 'out' : 'in',
-        qty: Number(ln.qty || 0) * Number(ln.multiplier || 1),
+        qty: receivedQty,
         reference_type: 'bill', reference_id: billId, notes: billNo
       });
-      // the cost on this bill becomes the item's current/last cost, superseding
-      // whatever cost was set when the item was first created
-      if (billType !== 'Credit' && Number(ln.cost || 0) > 0) {
-        update_('Items', ln.item_id, { cost_price: Number(ln.cost) });
+
+      if (billType !== 'Credit' && newCost > 0) {
+        var wac;
+        if (currentQty <= 0) {
+          // nothing on hand before this receipt — new cost IS the WAC
+          wac = newCost;
+        } else {
+          // weighted average:
+          //   (units already held × their cost  +  units received × receipt cost)
+          //   ─────────────────────────────────────────────────────────────────
+          //             total units after receipt
+          wac = (currentQty * currentCost + receivedQty * newCost) / (currentQty + receivedQty);
+        }
+        // round to 4 decimal places to avoid floating-point drift
+        update_('Items', ln.item_id, { cost_price: Math.round(wac * 10000) / 10000 });
       }
     }
   });
@@ -2661,4 +2681,79 @@ function reportUpdatedTransactions_(p) {
   scan('PurchaseOrders','po_no',       'supplier_id', supps, 'Purchase Order');
   result.sort(function(a,b){ return String(b.date).localeCompare(String(a.date)); });
   return { rows: result, count: result.length };
+}
+
+// =====================================================================
+//  RESET TEST DATA — run this from the Apps Script editor only.
+//  NOT exposed via doPost/doGet, same as migrate() and resetAdmin().
+//  ---------------------------------------------------------------------
+//  Clears: Items, Bills (+ BillItems), Sales Receipts (+ SalesReceiptItems),
+//  every Journal entry posted by those bills/receipts, every Deposit and its
+//  journal entry, the Payments rows those sales receipts created, and all
+//  StockMovements. Resets the bill/sales-receipt/UPC counters back to 0.
+//  Leaves EVERYTHING else untouched: Categories, Regions & Areas, Customers,
+//  Suppliers, Warehouses, Stores, Brands, UOM, Chart of Accounts, Users,
+//  Settings, and any other document type.
+//  ---------------------------------------------------------------------
+//  This is irreversible. Make a copy of the Sheet first if you want a
+//  safety net (File -> Make a copy) before running this.
+// =====================================================================
+function resetTestData() {
+  // 1. Remove every journal entry that bills or sales receipts posted
+  //    (this covers the bill's AP/Inventory entry, the receipt's revenue
+  //    entry, and the receipt's COGS entry, since all three share
+  //    source_type 'bill' or 'receipt').
+  deleteJournalBySourceType_('bill');
+  deleteJournalBySourceType_('receipt');
+
+  // 2. Remove every deposit and its journal entry. With no invoices in
+  //    this account, every deposit must trace back to a sales-receipt
+  //    payment, so it's safe to clear all of them here.
+  deleteJournalBySourceType_('deposit');
+  clearSheetData_('Deposits');
+
+  // 3. Remove the Payments rows sales receipts created in Undeposited Funds
+  deleteRowsWhere_('Payments', function (r) { return !!r.receipt_id; });
+
+  // 4. Stock history only makes sense for items/documents that still exist
+  clearSheetData_('StockMovements');
+
+  // 5. Line items, then the documents themselves
+  clearSheetData_('BillItems');
+  clearSheetData_('SalesReceiptItems');
+  clearSheetData_('Bills');
+  clearSheetData_('SalesReceipts');
+  clearSheetData_('Items');
+
+  // 6. Restart numbering from #1 for bills, sales receipts, and item UPCs
+  resetCounterValue_('bill', 0);
+  resetCounterValue_('sales_receipt', 0);
+  resetCounterValue_('upc', 0);
+
+  Logger.log('Done. Items, Bills, Sales Receipts, and their ledger entries are cleared. Categories, Regions & Areas, and everything else are untouched.');
+}
+
+function clearSheetData_(entity) {
+  var sh = sheet_(entity);
+  var lastRow = sh.getLastRow();
+  if (lastRow > 1) sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).clearContent();
+}
+
+function deleteRowsWhere_(entity, predicate) {
+  var sh = sheet_(entity);
+  rows_(entity).filter(predicate).map(function (r) { return r.__row; })
+    .sort(function (a, b) { return b - a; })
+    .forEach(function (row) { sh.deleteRow(row); });
+}
+
+function deleteJournalBySourceType_(sourceType) {
+  deleteRowsWhere_('Journal', function (r) { return String(r.source_type) === String(sourceType); });
+}
+
+function resetCounterValue_(name, val) {
+  var sh = sheet_('Counters');
+  var values = sh.getDataRange().getValues();
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][0]) === name) { sh.getRange(i + 1, 2).setValue(val); return; }
+  }
 }

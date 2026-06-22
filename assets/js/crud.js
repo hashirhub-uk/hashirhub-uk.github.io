@@ -240,11 +240,18 @@ const CRUD = {
       input = `<textarea name="${f.key}" rows="2">${UI.escape(v)}</textarea>`;
     } else if (f.type === 'select') {
       let opts = f.options || [];
-      if (f.ref) opts = (await this.options(f.ref)).map(o => ({ value: o.id, label: o[f.labelKey] || o.name || o.text }));
+      if (f.ref) opts = (await this.options(f.ref)).map(o => ({ value: o.id, label: o[f.labelKey] || o.name || o.text, system_key: o.system_key || '' }));
+      // if no value set and field has a systemDefault, pre-select the account
+      // whose system_key matches (e.g. 'cogs', 'sales', 'inventory')
+      let resolvedV = v;
+      if (!resolvedV && f.systemDefault) {
+        const match = opts.find(o => o.system_key === f.systemDefault);
+        if (match) resolvedV = match.value;
+      }
       const optsHtml = `<option value="">— none —</option>` + opts.map(o => {
         const val = (o.value !== undefined) ? o.value : o;
         const lab = (o.label !== undefined) ? o.label : o;
-        return `<option value="${UI.escape(val)}"${String(val) === String(v) ? ' selected' : ''}>${UI.escape(lab)}</option>`;
+        return `<option value="${UI.escape(val)}"${String(val) === String(resolvedV) ? ' selected' : ''}>${UI.escape(lab)}</option>`;
       }).join('');
       input = `<select name="${f.key}">${optsHtml}</select>`;
       if (f.quickAdd) {
