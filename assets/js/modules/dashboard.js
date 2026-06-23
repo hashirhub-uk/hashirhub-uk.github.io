@@ -82,9 +82,49 @@ Router.register("home", async (mount) => {
 
       mount.querySelector("#acct-balances").innerHTML = `
         <div class="card-head" style="padding:14px 16px 0;"><h2>Account Balances</h2></div>
-        ${x.accounts.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Account</th><th>Type</th><th class="num">Balance</th></tr></thead>
-          <tbody>${x.accounts.map(a => `<tr><td>${UI.escape(a.name)}</td><td>${UI.escape(a.type)}</td><td class="num">${UI.money(a.balance)}</td></tr>`).join("")}</tbody></table></div>`
+        ${x.accounts.length
+          ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Account</th><th>Type</th><th class="num">Balance</th></tr></thead>
+            <tbody>${x.accounts.map(a => `<tr class="acct-bal-row" data-id="${UI.escape(a.id)}" data-name="${UI.escape(a.name)}" style="cursor:pointer">
+              <td style="color:var(--accent)">${UI.escape(a.name)}</td>
+              <td>${UI.escape(a.type)}</td>
+              <td class="num" style="${a.balance < 0 ? 'color:var(--bad)' : ''}">${UI.money(a.balance)}</td>
+            </tr>`).join("")}</tbody></table></div>
+            <div id="acct-drill-panel" style="padding:0 16px 12px"></div>`
           : `<div class="empty"><p>No account activity yet.</p></div>`}`;
+
+      // wire clickable account rows → account statement drill-down
+      mount.querySelector("#acct-balances").querySelectorAll(".acct-bal-row").forEach(row => {
+        row.onclick = async () => {
+          const panel = mount.querySelector("#acct-drill-panel");
+          if (!panel) return;
+          panel.innerHTML = `<div class="empty" style="padding:12px 0"><p>Loading ${UI.escape(row.dataset.name)} transactions…</p></div>`;
+          try {
+            const today = new Date().toISOString().slice(0, 10);
+            const firstOfMonth = today.slice(0, 7) + "-01";
+            const d = await API.call("accountDrilldown", { account_id: row.dataset.id, from: firstOfMonth, to: today });
+            panel.innerHTML = `<div style="margin-top:10px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <strong>${UI.escape(d.account)}</strong>
+                <a class="link-btn" style="font-size:12px;padding:0" onclick="Router.go('report-account-statement')">Full Statement →</a>
+              </div>
+              <table class="data-table" style="font-size:12.5px">
+                <thead><tr><th>Date</th><th>Memo</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
+                <tbody>
+                  <tr class="rpt-subtotal"><td colspan="4">Opening Balance</td><td class="num">${UI.money(d.opening)}</td></tr>
+                  ${d.lines.map(r => `<tr>
+                    <td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.memo)}</td>
+                    <td class="num">${r.debit ? UI.money(r.debit) : ''}</td>
+                    <td class="num">${r.credit ? UI.money(r.credit) : ''}</td>
+                    <td class="num"><strong>${UI.money(r.balance)}</strong></td>
+                  </tr>`).join("")}
+                  ${!d.lines.length ? `<tr><td colspan="5" style="text-align:center;padding:10px;color:#94a3b8">No activity this month.</td></tr>` : ''}
+                  <tr class="rpt-grand"><td colspan="4"><strong>Closing Balance</strong></td><td class="num"><strong>${UI.money(d.closing)}</strong></td></tr>
+                </tbody>
+              </table>
+            </div>`;
+          } catch(e) { if (panel) panel.innerHTML = `<p style="color:var(--bad);padding:8px 0">${UI.escape(e.message)}</p>`; }
+        };
+      });
 
       const rt = mount.querySelector("#recent-tx");
       rt.innerHTML = `
@@ -152,22 +192,53 @@ function openRangeEditor(range, onApply) {
   };
 }
 function dashChart(title, labels, sA, sB) {
-  const W = 560, H = 240, padL = 8, padR = 8, padT = 12, padB = 26;
-  const max = Math.max(1, ...sA.values, ...sB.values);
-  const bh = H - padT - padB, gw = (W - padL - padR) / Math.max(1, labels.length);
-  const y = v => padT + bh - (v > 0 ? (v / max) * bh : 0);
-  let bars = "";
+  const W = 560, H = 220, padL = 52, padR = 12, padT = 14, padB = 28;
+  const bh = H - padT - padB, bw = W - padL - padR;
+  const n  = labels.length;
+  const allVals = [...sA.values, ...sB.values].filter(v => v > 0);
+  const maxV = allVals.length ? Math.max(...allVals) : 1;
+
+  // nice y-axis tick values
+  const ticks = 4;
+  const tickStep = maxV / ticks;
+  let yGridLines = '';
+  for (let t = 0; t <= ticks; t++) {
+    const val = t * tickStep;
+    const yy  = padT + bh - (val / maxV) * bh;
+    const fmt  = val >= 1000000 ? (val/1000000).toFixed(1)+'M' : val >= 1000 ? (val/1000).toFixed(0)+'K' : val.toFixed(0);
+    yGridLines += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W-padR}" y2="${yy.toFixed(1)}" stroke="#e2e8f0" stroke-width="1"/>`;
+    if (t > 0) yGridLines += `<text x="${padL-4}" y="${(yy+4).toFixed(1)}" text-anchor="end" class="ch-x">${UI.escape(fmt)}</text>`;
+  }
+
+  // coordinates for both series
+  const px = i => padL + (n > 1 ? (i / (n - 1)) * bw : bw / 2);
+  const py = v => padT + bh - Math.max(0, (v / maxV)) * bh;
+
+  const makePath = (vals) => vals.map((v, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(v).toFixed(1)}`).join(' ');
+
+  // x-axis labels — show every Nth label so they don't crowd
+  const skip = Math.max(1, Math.ceil(n / 10));
+  let xLabels = '';
   labels.forEach((lab, i) => {
-    const x0 = padL + i * gw, bw = Math.min(16, (gw - 12) / 2);
-    const xa = x0 + gw / 2 - bw - 2, xb = x0 + gw / 2 + 2;
-    bars += `<rect x="${xa}" y="${y(sA.values[i])}" width="${bw}" height="${padT + bh - y(sA.values[i])}" fill="${sA.color}" rx="2"><title>${UI.escape(lab)} · ${sA.name}: ${UI.money(sA.values[i])}</title></rect>`;
-    bars += `<rect x="${xb}" y="${y(sB.values[i])}" width="${bw}" height="${padT + bh - y(sB.values[i])}" fill="${sB.color}" rx="2"><title>${UI.escape(lab)} · ${sB.name}: ${UI.money(sB.values[i])}</title></rect>`;
-    bars += `<text x="${x0 + gw / 2}" y="${H - 8}" text-anchor="middle" class="ch-x">${UI.escape(lab)}</text>`;
+    if (i % skip === 0 || i === n - 1)
+      xLabels += `<text x="${px(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="ch-x">${UI.escape(lab)}</text>`;
   });
+
+  // dot on last data point for each series
+  const lastA = sA.values[n-1], lastB = sB.values[n-1];
+  const dots = `
+    <circle cx="${px(n-1).toFixed(1)}" cy="${py(lastA).toFixed(1)}" r="3" fill="${sA.color}"/>
+    <circle cx="${px(n-1).toFixed(1)}" cy="${py(lastB).toFixed(1)}" r="3" fill="${sB.color}"/>`;
+
   return `<div class="card">
     <div class="card-head"><h2>${UI.escape(title)}</h2></div>
     <div class="chart-legend"><span><i style="background:${sA.color}"></i>${UI.escape(sA.name)}</span><span><i style="background:${sB.color}"></i>${UI.escape(sB.name)}</span></div>
     <svg viewBox="0 0 ${W} ${H}" class="dash-chart" preserveAspectRatio="xMidYMid meet">
-      <line x1="${padL}" y1="${padT + bh}" x2="${W - padR}" y2="${padT + bh}" class="ch-axis"/>${bars}
+      ${yGridLines}
+      <line x1="${padL}" y1="${padT+bh}" x2="${W-padR}" y2="${padT+bh}" class="ch-axis"/>
+      <path d="${makePath(sA.values)}" fill="none" stroke="${sA.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+      <path d="${makePath(sB.values)}" fill="none" stroke="${sB.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5,3"/>
+      ${dots}
+      ${xLabels}
     </svg></div>`;
 }
