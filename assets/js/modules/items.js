@@ -7,12 +7,15 @@ const itemsCfg = {
   title: 'Items',
   singular: 'Item',
   columns: [
-    { key: 'sku',           label: 'UPC' },
-    { key: 'name',          label: 'Name' },
-    { key: 'category_id',   label: 'Category', ref: 'Categories' },
-    { key: 'brand_id',      label: 'Brand',    ref: 'Brands' },
-    { key: 'regular_price', label: 'Price',    type: 'money' },
-    { key: 'reorder_level', label: 'Reorder',  type: 'number' }
+    { key: 'sku',             label: 'UPC' },
+    { key: 'name',            label: 'Name' },
+    { key: 'category_id',     label: 'Category',       ref: 'Categories' },
+    { key: 'brand_id',        label: 'Brand',          ref: 'Brands' },
+    { key: 'cost_price',      label: 'Purchase Price', type: 'money' },
+    { key: 'regular_price',   label: 'Regular Price',  type: 'money' },
+    { key: 'wholesale_price', label: 'Wholesale Price',type: 'money' },
+    { key: 'on_hand',         label: 'Qty on Hand',    type: 'number' },
+    { key: 'reorder_level',   label: 'Reorder',        type: 'number' }
   ],
   tabs: [
     { label: 'General' },

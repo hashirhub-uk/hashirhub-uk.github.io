@@ -800,7 +800,9 @@ Router.register("report-inv-damaged", async (mount) => {
 // 4. Inventory Movement Summary
 Router.register("report-inv-movement", async (mount) => {
   const co = window.ABS_CONFIG.COMPANY || {};
-  const { catOpts } = await invFilters(mount);
+  let cats = [];
+  try { cats = await API.list("Categories"); } catch(e){}
+  const catOpts2 = `<option value="">All Categories</option>${cats.map(c=>`<option value="${UI.escape(String(c.id))}">${UI.escape(c.name)}</option>`).join("")}`;
   const def = presetDates("This Month-to-date");
   mount.innerHTML = `
     <div class="page-head"><h1>Inventory Movement Summary</h1>
@@ -811,38 +813,93 @@ Router.register("report-inv-movement", async (mount) => {
     </div>
     <div class="card no-print">
       <div class="form-grid">
+        <label class="field"><span class="field-label">Date Preset</span>
+          <select id="f-preset">${DATE_PRESETS.map(p=>`<option>${p}</option>`).join("")}</select></label>
+        <div></div>
         <label class="field"><span class="field-label">From Date</span><input type="date" id="f-from" value="${def.from}"></label>
         <label class="field"><span class="field-label">To Date</span><input type="date" id="f-to" value="${def.to}"></label>
-        <label class="field"><span class="field-label">Category</span><select id="f-cat">${catOpts}</select></label>
+        <label class="field"><span class="field-label">Category</span><select id="f-cat">${catOpts2}</select></label>
       </div>
       <div style="margin-top:12px"><button class="btn btn--primary" id="run-btn">View</button></div>
     </div>
     <div id="rpt-out"></div>`;
   mount.querySelector("#back-btn").onclick = () => Router.go("reports-inventory");
   mount.querySelector("#print-btn").onclick = () => window.print();
+  const preset = mount.querySelector("#f-preset");
+  preset.value = "This Month-to-date";
+  preset.onchange = function() {
+    if (this.value === "Custom") return;
+    if (this.value === "All") { mount.querySelector("#f-from").value = ''; mount.querySelector("#f-to").value = ''; return; }
+    const d = presetDates(this.value);
+    mount.querySelector("#f-from").value = d.from;
+    mount.querySelector("#f-to").value   = d.to;
+  };
+  const M = (v) => UI.money(v);
+  const N = (v) => Number(v||0).toFixed(2);
   const run = async () => {
     UI.loading(true, "Loading…");
     try {
-      const rows = await API.call("reportInventoryMovement", {
-        from: mount.querySelector("#f-from").value, to: mount.querySelector("#f-to").value,
-        category: mount.querySelector("#f-cat").value
+      const from = mount.querySelector("#f-from").value;
+      const to   = mount.querySelector("#f-to").value;
+      const data = await API.call("reportInventoryMovement", {
+        from, to, category: mount.querySelector("#f-cat").value
       });
-      mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
+      if (!data.groups || !data.groups.length) {
+        mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card"><div class="empty"><p>No inventory movements in this period.</p></div></div>`;
+        UI.loading(false); return;
+      }
+      const g = data.grand;
+      let html = `<div class="card no-print-card">
         <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
           <div class="report-title">Inventory Movement Summary</div>
-          <div class="report-period">${UI.date(mount.querySelector("#f-from").value)} — ${UI.date(mount.querySelector("#f-to").value)}</div></div>
-        <div class="table-wrap"><table class="data-table report-table">
-          <thead><tr><th>Item</th><th>SKU</th><th>Category</th>
-            <th class="num">Opening</th><th class="num">In</th><th class="num">Out</th><th class="num">Closing</th></tr></thead>
-          <tbody>${rows.map(r=>`<tr>
-            <td>${UI.escape(r.name)}</td><td>${UI.escape(r.sku)}</td><td>${UI.escape(r.category)}</td>
-            <td class="num">${r.opening}</td><td class="num" style="color:var(--ok)">${r.in_qty}</td>
-            <td class="num" style="color:var(--bad)">${r.out_qty}</td>
-            <td class="num"><strong>${r.closing}</strong></td>
-          </tr>`).join("")}
-          ${!rows.length?`<tr><td colspan="7" style="text-align:center;padding:28px">No movements in this period.</td></tr>`:""}
-          </tbody>
-        </table></div></div>`;
+          <div class="report-period">${from?UI.date(from)+" — "+UI.date(to):"All Dates"}</div></div>
+        <div class="table-wrap"><table class="data-table report-table" style="font-size:12.5px">
+          <thead><tr>
+            <th class="num">Sr#</th><th style="min-width:220px">Item</th>
+            <th class="num">Opening Qty</th><th class="num">Qty In</th><th class="num">Qty Out</th>
+            <th class="num">Adjusted In</th><th class="num">Adjusted Out</th><th class="num">Closing Qty</th>
+            <th class="num">Opening Value</th><th class="num">Value In</th><th class="num">Value Out</th><th class="num">Closing Value</th>
+          </tr></thead>
+          <tbody>`;
+      data.groups.forEach(grp => {
+        html += `<tr style="background:var(--row-alt)"><td colspan="12" style="font-weight:600;padding:8px 12px">${UI.escape(grp.category)}</td></tr>`;
+        grp.items.forEach(it => {
+          html += `<tr>
+            <td class="num" style="color:#94a3b8">${it.sr}</td>
+            <td><span style="color:#94a3b8;font-size:11px;margin-right:6px">${UI.escape(it.sku)}</span><span style="color:var(--accent)">${UI.escape(it.name)}</span></td>
+            <td class="num">${it.opening_qty}</td>
+            <td class="num" style="${it.qty_in>0?'color:var(--ok)':''}">${it.qty_in}</td>
+            <td class="num" style="${it.qty_out>0?'color:var(--bad)':''}">${it.qty_out}</td>
+            <td class="num" style="${it.adj_in>0?'color:var(--ok)':''}">${it.adj_in}</td>
+            <td class="num" style="${it.adj_out>0?'color:var(--bad)':''}">${it.adj_out}</td>
+            <td class="num"><strong>${it.closing_qty}</strong></td>
+            <td class="num">${M(it.opening_val)}</td>
+            <td class="num">${M(it.val_in)}</td>
+            <td class="num">${M(it.val_out)}</td>
+            <td class="num"><strong>${M(it.closing_val)}</strong></td>
+          </tr>`;
+        });
+        const t = grp.total;
+        html += `<tr class="rpt-subtotal">
+          <td colspan="2"><strong>Total ${UI.escape(grp.category)}</strong></td>
+          <td class="num">${N(t.opening_qty)}</td><td class="num">${N(t.qty_in)}</td>
+          <td class="num">${N(t.qty_out)}</td><td class="num">${N(t.adj_in)}</td>
+          <td class="num">${N(t.adj_out)}</td><td class="num">${N(t.closing_qty)}</td>
+          <td class="num">${M(t.opening_val)}</td><td class="num">${M(t.val_in)}</td>
+          <td class="num">${M(t.val_out)}</td><td class="num"><strong>${M(t.closing_val)}</strong></td>
+        </tr>`;
+      });
+      html += `<tr class="rpt-grand">
+        <td colspan="2"><strong>Grand Total</strong></td>
+        <td class="num">${N(g.opening_qty)}</td><td class="num">${N(g.qty_in)}</td>
+        <td class="num">${N(g.qty_out)}</td><td class="num">${N(g.adj_in)}</td>
+        <td class="num">${N(g.adj_out)}</td><td class="num">${N(g.closing_qty)}</td>
+        <td class="num"><strong>${M(g.opening_val)}</strong></td>
+        <td class="num"><strong>${M(g.val_in)}</strong></td>
+        <td class="num"><strong>${M(g.val_out)}</strong></td>
+        <td class="num"><strong>${M(g.closing_val)}</strong></td>
+      </tr></tbody></table></div></div>`;
+      mount.querySelector("#rpt-out").innerHTML = html;
     } catch(e) { UI.toast(e.message, "error"); }
     UI.loading(false);
   };

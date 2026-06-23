@@ -216,7 +216,18 @@ function handle_(e) {
     if (!validToken_(p.token)) return out_({ ok: false, error: 'Unauthorized. Please sign in again.' });
 
     switch (action) {
-      case 'list':       return out_({ ok: true, data: list_(p.entity, p) });
+      case 'list': {
+        var listData = list_(p.entity, p);
+        if (p.entity === 'Items') {
+          var ohMap = onHandMap_();
+          listData = listData.map(function(it) {
+            var o = Object.assign({}, it);
+            o.on_hand = ohMap[String(it.id)] || 0;
+            return o;
+          });
+        }
+        return out_({ ok: true, data: listData });
+      }
       case 'get':        return out_({ ok: true, data: get_(p.entity, p.id) });
       case 'create':     return out_({ ok: true, data: create_(p.entity, p.data || {}) });
       case 'update':     return out_({ ok: true, data: update_(p.entity, p.id, p.data || {}) });
@@ -2180,31 +2191,95 @@ function reportInventoryDamaged_(p) {
 }
 
 function reportInventoryMovement_(p) {
-  var cats = nameMap_('Categories'), brands = nameMap_('Brands');
-  var from = String(p.from || ''), to = String(p.to || today_());
+  var from = p.from ? dayKey_(p.from) : '';
+  var to   = p.to   ? dayKey_(p.to)   : '';
   var catFilter = String(p.category || '');
-  var items = list_('Items', {});
-  if (catFilter) items = items.filter(function(it){ return String(it.category_id) === catFilter; });
-  var movements = rows_('StockMovements');
+  var cats = nameMap_('Categories');
 
-  var res = items.map(function(it){
-    var id = String(it.id);
-    var opening = 0, inQty = 0, outQty = 0;
-    movements.forEach(function(m){
-      if (String(m.item_id) !== id) return;
-      var d = String(m.date || '').slice(0,10);
-      var qty = Number(m.qty || 0);
-      var isIn = String(m.type) === 'in';
-      if (from && d < from) { opening += isIn ? qty : -qty; return; }
-      if (to && d > to) return;
-      if (isIn) inQty += qty; else outQty += qty;
+  // build item metadata
+  var itemMeta = {};
+  rows_('Items').forEach(function(it) {
+    itemMeta[String(it.id)] = {
+      name: it.name||'', sku: it.sku||'', category_id: String(it.category_id||''),
+      category: cats[String(it.category_id||'')] || 'Uncategorized',
+      cost: Number(it.cost_price||0)
+    };
+  });
+
+  // accumulate movements per item
+  var itemData = {};
+  rows_('StockMovements').forEach(function(m) {
+    var id  = String(m.item_id||''); if (!id) return;
+    var meta = itemMeta[id]; if (!meta) return;
+    if (catFilter && meta.category_id !== catFilter) return;
+    if (!itemData[id]) itemData[id] = { opening:0, qty_in:0, qty_out:0, adj_in:0, adj_out:0 };
+    var d   = dayKey_(m.date);
+    var qty = Number(m.qty||0);
+    var typ = String(m.type||'');      // 'in' or 'out'
+    var ref = String(m.reference_type||'');
+    if (from && d < from) {
+      // before the period → contributes to opening balance
+      itemData[id].opening += (typ === 'in' ? qty : -qty);
+      return;
+    }
+    if (to && d > to) return;           // after the period → ignore
+    // within the period
+    if (ref === 'bill' && typ === 'in')                               itemData[id].qty_in  += qty;
+    else if ((ref === 'invoice' || ref === 'receipt') && typ === 'out') itemData[id].qty_out += qty;
+    else if (ref === 'adjustment' && typ === 'in')                    itemData[id].adj_in  += qty;
+    else if (ref === 'adjustment' && typ === 'out')                   itemData[id].adj_out += qty;
+    else if (ref === 'opening' && typ === 'in') {
+      // opening stock entries within the period
+      if (from) itemData[id].qty_in += qty; else itemData[id].opening += qty;
+    }
+    else if (typ === 'in')  itemData[id].qty_in  += qty;  // transfer, etc.
+    else                    itemData[id].qty_out += qty;
+  });
+
+  // build result rows grouped by category
+  var catMap = {};
+  Object.keys(itemData).forEach(function(id) {
+    var meta = itemMeta[id]; if (!meta) return;
+    var d    = itemData[id];
+    var cost = meta.cost;
+    var closing = d.opening + d.qty_in - d.qty_out + d.adj_in - d.adj_out;
+    var hasMovement = d.opening||d.qty_in||d.qty_out||d.adj_in||d.adj_out;
+    if (!hasMovement) return;   // skip items with no activity
+    var cat = meta.category;
+    if (!catMap[cat]) catMap[cat] = [];
+    catMap[cat].push({
+      id: id, sku: meta.sku, name: meta.name, category: cat,
+      opening_qty:  d.opening, qty_in:  d.qty_in, qty_out: d.qty_out,
+      adj_in:       d.adj_in,  adj_out: d.adj_out,
+      closing_qty:  closing,
+      opening_val:  d.opening * cost,
+      val_in:       d.qty_in  * cost,
+      val_out:      d.qty_out * cost,
+      closing_val:  closing   * cost
     });
-    var closing = opening + inQty - outQty;
-    return { name: it.name, sku: it.sku || '', category: cats[String(it.category_id)] || '',
-      opening: opening, in_qty: inQty, out_qty: outQty, closing: closing };
-  }).filter(function(r){ return r.opening !== 0 || r.in_qty !== 0 || r.out_qty !== 0; });
+  });
 
-  return res;
+  var sr = 0;
+  var groups = Object.keys(catMap).sort().map(function(cat) {
+    var items = catMap[cat].sort(function(a,b){ return String(a.name).localeCompare(String(b.name)); });
+    items.forEach(function(it){ it.sr = ++sr; });
+    var tot = items.reduce(function(s,it) {
+      return { opening_qty:s.opening_qty+it.opening_qty, qty_in:s.qty_in+it.qty_in,
+        qty_out:s.qty_out+it.qty_out, adj_in:s.adj_in+it.adj_in, adj_out:s.adj_out+it.adj_out,
+        closing_qty:s.closing_qty+it.closing_qty, opening_val:s.opening_val+it.opening_val,
+        val_in:s.val_in+it.val_in, val_out:s.val_out+it.val_out, closing_val:s.closing_val+it.closing_val };
+    }, {opening_qty:0,qty_in:0,qty_out:0,adj_in:0,adj_out:0,closing_qty:0,opening_val:0,val_in:0,val_out:0,closing_val:0});
+    return { category: cat, items: items, total: tot };
+  });
+
+  var grand = groups.reduce(function(s,g) {
+    return { opening_qty:s.opening_qty+g.total.opening_qty, qty_in:s.qty_in+g.total.qty_in,
+      qty_out:s.qty_out+g.total.qty_out, adj_in:s.adj_in+g.total.adj_in, adj_out:s.adj_out+g.total.adj_out,
+      closing_qty:s.closing_qty+g.total.closing_qty, opening_val:s.opening_val+g.total.opening_val,
+      val_in:s.val_in+g.total.val_in, val_out:s.val_out+g.total.val_out, closing_val:s.closing_val+g.total.closing_val };
+  }, {opening_qty:0,qty_in:0,qty_out:0,adj_in:0,adj_out:0,closing_qty:0,opening_val:0,val_in:0,val_out:0,closing_val:0});
+
+  return { from:from, to:to, groups:groups, grand:grand };
 }
 
 function reportInventoryVendor_(p) {
@@ -2348,7 +2423,8 @@ function buildSalesIndex_() {
 }
 
 function inDateRange_(dateStr, from, to) {
-  var d = String(dateStr||'').slice(0,10);
+  var d = dayKey_(dateStr);           // handles both Date objects and strings
+  if (!d) return false;
   return (!from || d >= from) && (!to || d <= to);
 }
 
