@@ -1767,23 +1767,17 @@ function dashboardCharts_() {
 }
 
 function dashboardExtra_() {
-  // Account types to EXCLUDE from the dashboard balance panel.
-  // We want balance-sheet "real" accounts only — not P&L accounts or inventory
-  // valuation accounts the user said they don't want to see here.
-  var EXCLUDE_TYPES   = ['Income','Other Income','Expense','Other Expense','Cost of Goods Sold'];
-  var EXCLUDE_SYS_KEY = ['inventory','sales','sales_discount','pos_drawer'];
-
-  var bal = {};
-  rows_('Journal').forEach(function (r) {
-    var a = String(r.account_id);
-    bal[a] = (bal[a] || 0) + Number(r.debit || 0) - Number(r.credit || 0);
-  });
+  // WHITELIST — only these 4 system accounts + manually created Bank/AR/AP accounts.
+  // Nothing else ever appears, regardless of what other accounts exist.
+  var ALWAYS_SHOW     = ['ar', 'ap', 'cash', 'undeposited'];
+  var MANUAL_OK_TYPES = ['Bank', 'Accounts Receivable', 'Accounts Payable'];
 
   var accounts = accountsWithBalances_()
     .filter(function (a) {
-      if (EXCLUDE_TYPES.indexOf(a.account_type) !== -1)             return false;
-      if (EXCLUDE_SYS_KEY.indexOf(a.system_key || '') !== -1)       return false;
-      return true;
+      var sk = a.system_key || '';
+      if (ALWAYS_SHOW.indexOf(sk) !== -1) return true;
+      if (sk === '' && MANUAL_OK_TYPES.indexOf(a.account_type) !== -1) return true;
+      return false;
     })
     .map(function (a) {
       return { id: String(a.id), name: a.account_name, type: a.account_type,
@@ -2383,7 +2377,8 @@ function buildSalesIndex_() {
 }
 
 function inDateRange_(dateStr, from, to) {
-  var d = String(dateStr||'').slice(0,10);
+  var d = dayKey_(dateStr);
+  if (!d) return false;
   return (!from || d >= from) && (!to || d <= to);
 }
 
@@ -3160,4 +3155,26 @@ function resetAllTransactions() {
     sh.getRange(i + 1, 2).setValue(0);
   }
   Logger.log('Done. All transactions, ledger entries, and stock history cleared. Counters reset to 0. Settings, Chart of Accounts, Items, Customers, Suppliers, and all reference data are untouched.');
+}
+
+// =====================================================================
+//  KEEP-ALIVE  — prevents Apps Script cold starts
+//  Run installKeepAlive() once from the editor. That's it.
+// =====================================================================
+function keepAlive() {
+  PropertiesService.getScriptProperties().getProperty('__ping__');
+}
+function installKeepAlive() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'keepAlive') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('keepAlive').timeBased().everyMinutes(10).create();
+  Logger.log('Keep-alive trigger installed. Script pings every 10 minutes.');
+}
+function uninstallKeepAlive() {
+  var n = 0;
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'keepAlive') { ScriptApp.deleteTrigger(t); n++; }
+  });
+  Logger.log('Keep-alive removed (' + n + ' triggers deleted).');
 }
