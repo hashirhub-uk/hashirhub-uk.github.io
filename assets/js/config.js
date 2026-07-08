@@ -4,7 +4,7 @@
 
 window.ABS_CONFIG = {
 
-  APP_NAME: "Adil Business Solutions",
+  APP_NAME: "Hashir Hub",
   APP_SHORT: "ABS",
   TAGLINE:   "Invoicing & Inventory",
 
