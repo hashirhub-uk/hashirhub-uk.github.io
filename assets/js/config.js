@@ -26,7 +26,7 @@ window.ABS_CONFIG = {
     invoice_prefix:  "INV-"
   },
 
-  VERSION: "7.20",
+  VERSION: "7.21",
 
   MENU: [
     { label: "Dashboard", icon: "home", route: "home" },

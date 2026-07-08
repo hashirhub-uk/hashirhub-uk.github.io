@@ -72,7 +72,7 @@ const App = {
     const cfg  = window.ABS_CONFIG;
     const user = Session.user() || { name: "User" };
     const sess = Session.get() || {};
-    const companyLabel = sess.company_name || cfg.APP_NAME;
+    const companyLabel = cfg.APP_NAME; // v7.21: brand shows Hashir Hub, not the client company name
 
     document.body.className = "view-app";
     document.body.innerHTML = `
