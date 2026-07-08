@@ -48,6 +48,30 @@ const API = {
 
   ping()                     { return this.call("ping"); },
   login(username, password)  { return this.call("login", { username, password }); },
+
+  // v7.20 — ask the master Registry which company owns this username.
+  async resolve(username) {
+    const url = window.ABS_CONFIG.REGISTRY_URL;
+    if (!url || /PASTE_/.test(url)) throw new Error("Login service is not configured.");
+    let res;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "resolve", username }),
+        redirect: "follow"
+      });
+    } catch (e) { throw new Error("Could not reach the login service."); }
+    let json;
+    try { json = await res.json(); }
+    catch { throw new Error("Login service returned an unexpected response."); }
+    if (!json.ok) throw new Error(json.error || "Invalid username or password.");
+    return json.data; // { api_url, company_name }
+  },
+
+  changePassword(oldPw, newPw) {
+    return this.call("changePassword", { old_password: oldPw, new_password: newPw });
+  },
   dashboard()                { return this.call("dashboard"); },
   salesSummary(from, to)     { return this.call("salesSummary", { from, to }); },
   weeklySummary()            { return this.call("weeklySummary"); },

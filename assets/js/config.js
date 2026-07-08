@@ -5,11 +5,15 @@
 window.ABS_CONFIG = {
 
   APP_NAME: "Hashir Hub",
-  APP_SHORT: "ABS",
+  APP_SHORT: "Hashir Hub",
   TAGLINE:   "Invoicing & Inventory",
 
   // API_URL kept as fallback in case session has no api_url
   API_URL: "https://script.google.com/macros/s/AKfycbz7tHSyERDRNsCHr4Jh9Z7T0dW7UpEyDfBNvYkIbZUBNLVbhsYG1TBMaL6Z3iQ3ykhF/exec",
+
+  // Master Registry web app URL — resolves username -> company backend.
+  // Paste the Registry deployment /exec URL here.
+  REGISTRY_URL: "https://script.google.com/macros/s/AKfycbzUzJG_MEW4se4Up68WCS5NkbVX3sqBm2pU7Fdh95qcX0i_ypOatiOV1a4o1KiiyfDd/exec",
 
   COMPANY: {
     name:            "Adil Business Solutions",
@@ -22,7 +26,7 @@ window.ABS_CONFIG = {
     invoice_prefix:  "INV-"
   },
 
-  VERSION: "7.19",
+  VERSION: "7.20",
 
   MENU: [
     { label: "Dashboard", icon: "home", route: "home" },
@@ -37,7 +41,7 @@ window.ABS_CONFIG = {
       { label: "Templates",             route: "templates" },
       { label: "UOM",                   route: "uom" },
       { label: "Sales Representatives", route: "sales-representatives" },
-      { label: "Users",                 route: "users" },
+      { label: "My Account",            route: "users" },
       { label: "Company Information",   route: "company-information" },
       { label: "Appearance",            route: "appearance" }
     ]},

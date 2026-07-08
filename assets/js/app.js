@@ -12,30 +12,18 @@ const App = {
 
   // --- Login screen ----------------------------------------------------
   showLogin() {
-    const cfg       = window.ABS_CONFIG;
-    const companies = window.ABS_COMPANIES || [];
+    const cfg = window.ABS_CONFIG;
 
-    // Build company options
-    const companyOptions = companies.map((c, i) =>
-      `<option value="${i}">${c.name}</option>`
-    ).join("");
-
-    document.body.className  = "view-login";
-    document.body.innerHTML  = `
+    document.body.className = "view-login";
+    document.body.innerHTML = `
       <div class="login-wrap">
         <div class="login-card">
           <div class="brand brand--lg brand--logo">
             <img src="assets/images/hashir-hub-lockup.png" alt="Hashir Hub" class="brand-lockup">
           </div>
           <form id="login-form" class="login-form" autocomplete="on">
-            ${companies.length > 1 ? `
-            <label>Company
-              <select name="company_index" id="company-select">
-                ${companyOptions}
-              </select>
-            </label>` : ""}
             <label>Username
-              <input name="username" type="text" required autofocus>
+              <input name="username" type="text" required autofocus autocapitalize="none" spellcheck="false">
             </label>
             <label>Password
               <input name="password" type="password" required>
@@ -54,28 +42,27 @@ const App = {
       e.preventDefault();
       err.textContent = "";
       const fd       = new FormData(form);
-      const idx      = parseInt(fd.get("company_index") || "0", 10);
-      const company  = companies[idx] || companies[0];
+      const username = String(fd.get("username") || "").trim();
+      const password = String(fd.get("password") || "");
+      if (!username || !password) { err.textContent = "Enter username and password."; return; }
 
-      if (!company) {
-        err.textContent = "No companies configured. Add entries to companies.js.";
-        return;
-      }
-
-      // Temporarily store the selected URL so API.call() works during login
-      const tempSession = { api_url: company.url, token: null, user: null };
-      Session.set(tempSession);
-
-      UI.loading(true, "Signing in…");
+      UI.loading(true, "Signing in\u2026");
       try {
-        const res = await API.login(fd.get("username").trim(), fd.get("password"));
-        Session.set({ token: res.token, user: res.user, api_url: company.url, company_name: company.name });
+        // 1) Ask the Registry which company owns this username.
+        const dir = await API.resolve(username);
+        // 2) Authenticate against that company's own backend.
+        Session.set({ api_url: dir.api_url, token: null, user: null });
+        const res = await API.login(username, password);
+        Session.set({ token: res.token, user: res.user, api_url: dir.api_url, company_name: dir.company_name });
         UI.loading(false);
         this.showApp();
       } catch (ex) {
         Session.clear();
         UI.loading(false);
-        err.textContent = ex.message;
+        const m = String((ex && ex.message) || "");
+        // Surface config/network problems; keep auth failures generic.
+        err.textContent = /configured|reach|unexpected response/i.test(m)
+          ? m : "Invalid username or password.";
       }
     });
   },

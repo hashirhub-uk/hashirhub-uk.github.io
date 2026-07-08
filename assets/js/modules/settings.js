@@ -314,21 +314,61 @@ Router.register('price-lists', (m) => CRUD.page(m, {
   ]
 }));
 
-// ---- Users ------------------------------------------------------------
-Router.register('users', (m) => CRUD.page(m, {
-  entity: 'Users', title: 'Users', singular: 'User',
-  columns: [
-    { key: 'name', label: 'Name' },
-    { key: 'username', label: 'Username' },
-    { key: 'role', label: 'Role' },
-    { key: 'status', label: 'Status' }
-  ],
-  fields: [
-    { key: 'name', label: 'Full Name', required: true, wide: true },
-    { key: 'username', label: 'Username', required: true },
-    { key: 'password', label: 'Password (blank = keep existing)', type: 'password' },
-    { key: 'role', label: 'Role', type: 'select', default: 'Cashier',
-      options: ['Super Administrator', 'Administrator', 'Manager', 'Accountant', 'Cashier', 'Delivery Man', 'Order Processor', 'Salesman'] },
-    { key: 'status', label: 'Status', type: 'select', options: ['active', 'inactive'], default: 'active' }
-  ]
-}));
+// ---- My Account (self-service password change) -----------------------
+// v7.20: clients can no longer create or manage user accounts. They may
+// only change their own password. Provisioning is done by the provider.
+Router.register('users', (m) => {
+  const sess = Session.get() || {};
+  const user = sess.user || {};
+  m.innerHTML = `
+    <div class="page-head">
+      <h1 class="page-title">My Account</h1>
+      <span class="page-sub">Change your password</span>
+    </div>
+    <div class="card" style="max-width:480px">
+      <div class="form-grid">
+        <label class="wide">Username
+          <input type="text" value="${UI.escape(user.username || '')}" disabled>
+        </label>
+        <form id="pw-form" class="form-grid" autocomplete="off" style="grid-column:1/-1">
+          <label class="wide">Current password
+            <input name="old" type="password" required autocomplete="current-password">
+          </label>
+          <label class="wide">New password (at least 6 characters)
+            <input name="new1" type="password" required minlength="6" autocomplete="new-password">
+          </label>
+          <label class="wide">Confirm new password
+            <input name="new2" type="password" required minlength="6" autocomplete="new-password">
+          </label>
+          <div class="wide" style="display:flex;align-items:center;gap:12px">
+            <button type="submit" class="btn btn--primary">Change password</button>
+            <span id="pw-msg" class="login-error" style="margin:0"></span>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  const form = m.querySelector('#pw-form');
+  const msg  = m.querySelector('#pw-msg');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    msg.textContent = ''; msg.style.color = '';
+    const fd = new FormData(form);
+    const oldPw = String(fd.get('old') || '');
+    const n1 = String(fd.get('new1') || '');
+    const n2 = String(fd.get('new2') || '');
+    if (n1 !== n2) { msg.textContent = 'New passwords do not match.'; return; }
+    UI.loading(true, 'Updating\u2026');
+    try {
+      await API.changePassword(oldPw, n1);
+      UI.loading(false);
+      form.reset();
+      msg.style.color = '#0f766e';
+      msg.textContent = 'Password changed successfully.';
+      UI.toast('Password updated', 'success');
+    } catch (ex) {
+      UI.loading(false);
+      msg.textContent = ex.message;
+    }
+  });
+});
