@@ -114,8 +114,8 @@ const App = {
     });
     scrim.addEventListener("click", () => { sidebar.classList.remove("open"); scrim.classList.remove("show"); });
 
-    UI.$$(".nav-group > .nav-group-head").forEach(h => {
-      h.addEventListener("click", () => h.parentElement.classList.toggle("open"));
+    UI.$$(".nav-group-head").forEach(h => {
+      h.addEventListener("click", (e) => { e.stopPropagation(); h.parentElement.classList.toggle("open"); });
     });
     UI.$$(".nav-link").forEach(a => a.addEventListener("click", () => {
       sidebar.classList.remove("open"); scrim.classList.remove("show");
@@ -163,25 +163,30 @@ const App = {
 
   buildNav(menu) {
     const built = new Set(window.ABS_CONFIG.BUILT_ROUTES || []);
-    const link  = (item) => {
+    const chev = `<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>`;
+    const leaf = (item) => {
       const ready = built.has(item.route) ? "" : " is-soon";
       return `<a class="nav-link${ready}" data-route="${item.route}" href="#${item.route}">
         <span class="nav-label">${UI.escape(item.label)}</span>
         ${built.has(item.route) ? "" : '<span class="soon-dot" title="Planned"></span>'}
       </a>`;
     };
-    return menu.map(item => {
+    // top=true renders a top-level group/link; nested groups render as sub-accordions
+    const node = (item, top) => {
       if (item.children) {
-        return `<div class="nav-group">
-          <div class="nav-group-head">${UI.icon(item.icon)}<span>${UI.escape(item.label)}</span>
-            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
-          </div>
-          <div class="nav-group-body">${item.children.map(link).join("")}</div>
-        </div>`;
+        const groupCls = top ? "nav-group" : "nav-group nav-subgroup";
+        const head = top
+          ? `<div class="nav-group-head">${UI.icon(item.icon)}<span>${UI.escape(item.label)}</span>${chev}</div>`
+          : `<div class="nav-group-head nav-subhead"><span>${UI.escape(item.label)}</span>${chev}</div>`;
+        return `<div class="${groupCls}">${head}<div class="nav-group-body">${item.children.map(c => node(c, false)).join("")}</div></div>`;
       }
-      return `<a class="nav-link nav-top" data-route="${item.route}" href="#${item.route}">
-        ${UI.icon(item.icon)}<span class="nav-label">${UI.escape(item.label)}</span></a>`;
-    }).join("");
+      if (top) {
+        return `<a class="nav-link nav-top" data-route="${item.route}" href="#${item.route}">
+          ${UI.icon(item.icon)}<span class="nav-label">${UI.escape(item.label)}</span></a>`;
+      }
+      return leaf(item);
+    };
+    return menu.map(item => node(item, true)).join("");
   }
 };
 

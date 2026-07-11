@@ -26,7 +26,7 @@ window.ABS_CONFIG = {
     invoice_prefix:  "INV-"
   },
 
-  VERSION: "7.22",
+  VERSION: "7.23",
 
   MENU: [
     { label: "Dashboard", icon: "home", route: "home" },
@@ -65,11 +65,20 @@ window.ABS_CONFIG = {
     { label: "Accounts", icon: "layers", children: [
       { label: "Chart of Accounts", route: "accounts" },
       { label: "General Journal",   route: "general-journal" },
-      { label: "Customer Payments", route: "customer-payments" },
-      { label: "Pay Bills",         route: "pay-bills" },
-      { label: "View Paid Bills",   route: "view-paid-bills" },
-      { label: "Transfer Funds",    route: "transfer-funds" },
-      { label: "Check Register",    route: "check-register" }
+      { label: "Customer Payments", children: [
+        { label: "Receive Payment", route: "receive-payments" },
+        { label: "View Payments",   route: "view-payments" },
+        { label: "Record Deposit",  route: "show-undeposited-list" },
+        { label: "View Deposits",   route: "view-deposits" }
+      ]},
+      { label: "Supplier Payment", children: [
+        { label: "Pay Bills",       route: "pay-bills" },
+        { label: "View Paid Bills", route: "view-paid-bills" }
+      ]},
+      { label: "Banking", children: [
+        { label: "Transfer Funds",  route: "transfer-funds" },
+        { label: "Check Register",  route: "check-register" }
+      ]}
     ]},
 
     { label: "Transactions", icon: "file-text", children: [
@@ -91,17 +100,65 @@ window.ABS_CONFIG = {
     ]},
 
     { label: "Reports", icon: "chart", children: [
-      { label: "All Reports",         route: "all-reports" },
-      { label: "Company & Financial", route: "reports-company-financial" },
-      { label: "Receivables",         route: "reports-receivables" },
-      { label: "Payables",            route: "reports-payables" },
-      { label: "Accounts",            route: "reports-accounts" },
-      { label: "Inventory",           route: "reports-inventory" },
-      { label: "Purchases",            route: "reports-purchases" },
-      { label: "Sales",                route: "reports-sales" },
-      { label: "Discounts",            route: "reports-discounts" },
-      { label: "Sales Orders",         route: "reports-sales-orders" },
-      { label: "Misc.",                route: "reports-misc" }
+      { label: "All Reports", route: "all-reports" },
+      { label: "Company & Financial", children: [
+        { label: "Profit and Loss Standard", route: "report-pl" },
+        { label: "Balance Sheet Standard", route: "report-balance-sheet" },
+        { label: "Trial Balance", route: "report-trial-balance" },
+        { label: "Income By Customer Summary", route: "report-income-customer" },
+        { label: "Transactions Summary", route: "report-transactions-summary" }
+      ]},
+      { label: "Receivables", children: [
+        { label: "Customer Balance Summary", route: "report-customer-balances" },
+        { label: "Payment Collection Summary", route: "report-payment-collection" },
+        { label: "Customer Statement", route: "report-customer-statement" },
+        { label: "Account Statement", route: "report-account-statement" }
+      ]},
+      { label: "Payables", children: [
+        { label: "Supplier Balance Summary", route: "report-supplier-balances" },
+        { label: "Supplier Statement", route: "report-supplier-statement" }
+      ]},
+      { label: "Accounts", children: [
+        { label: "Journal", route: "report-journal" },
+        { label: "General Ledger", route: "report-general-ledger" }
+      ]},
+      { label: "Inventory", children: [
+        { label: "Items List", route: "items" },
+        { label: "Quantity On-hand by Warehouse", route: "report-inv-onhand" },
+        { label: "Inventory Valuation by Warehouse", route: "report-inv-valuation" },
+        { label: "Damaged/Expired Inventory", route: "report-inv-damaged" },
+        { label: "Inventory Movement Summary", route: "report-inv-movement" },
+        { label: "Stock Status by Vendor", route: "report-inv-vendor" },
+        { label: "Physical Inventory Worksheet", route: "report-inv-worksheet" }
+      ]},
+      { label: "Purchases", children: [
+        { label: "Purchases by Suppliers Summary", route: "report-purchases-suppliers" }
+      ]},
+      { label: "Sales", children: [
+        { label: "Sales by Category Summary", route: "report-sales-category" },
+        { label: "Sales by Items Summary", route: "report-sales-items" },
+        { label: "Invoices Summary", route: "report-invoices-summary" },
+        { label: "Sales by Customers Summary", route: "report-sales-customers" },
+        { label: "Sales By Representative Summary", route: "report-sales-rep" },
+        { label: "Return Stock By Representative Summary", route: "report-return-stock-rep" },
+        { label: "Sales By Salesman Summary", route: "report-sales-salesman" },
+        { label: "Financial Recovery and Sales Performance Summary", route: "report-financial-recovery" },
+        { label: "Invoice Items Summary", route: "report-invoice-items" },
+        { label: "Invoice Batch Print", route: "report-invoice-batch-print" },
+        { label: "Customers Items Sales Summary", route: "report-customers-items-sales" }
+      ]},
+      { label: "Discounts", children: [
+        { label: "Customers Discounts Summary", route: "report-customer-discounts" },
+        { label: "Items Discounts Summary", route: "report-item-discounts" }
+      ]},
+      { label: "Sales Orders", children: [
+        { label: "Sales Orders Summary", route: "report-sales-orders-summary" },
+        { label: "Open Orders Summary", route: "report-open-orders" }
+      ]},
+      { label: "Misc.", children: [
+        { label: "Deleted Transactions", route: "report-deleted-transactions" },
+        { label: "Updated Transactions", route: "report-updated-transactions" }
+      ]}
     ]}
   ],
 
