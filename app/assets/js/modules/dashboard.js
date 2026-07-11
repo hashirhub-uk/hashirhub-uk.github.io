@@ -8,7 +8,7 @@ Router.register("home", async (mount) => {
   const cfg = window.ABS_CONFIG;
 
   mount.innerHTML = `
-    <div class="page-head"><h1>Dashboard</h1><span class="page-sub">${UI.escape((cfg.COMPANY && cfg.COMPANY.name) || cfg.APP_NAME)}</span></div>
+    <div class="page-head"><h1>Dashboard</h1><div class="page-actions"><button class="btn btn--primary" id="dash-scan">▣ Scan Item</button></div></div>
 
     <div class="kpi-grid" id="sales-kpis">
       ${salesCard("today", "Today's Sales")}
@@ -37,6 +37,7 @@ Router.register("home", async (mount) => {
 
   // clickable KPI cards
   mount.querySelectorAll(".kpi[data-route]").forEach(c => c.onclick = () => Router.go(c.dataset.route));
+  { const sb = mount.querySelector("#dash-scan"); if (sb) sb.onclick = () => (window.Scan ? Scan.itemMenu() : UI.toast("Scanner loading…")); }
 
   const status = mount.querySelector("#conn-status");
   if (!API.configured()) { status.innerHTML = `<span class="dot dot--bad"></span> Backend not configured`; return; }

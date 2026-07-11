@@ -257,7 +257,7 @@ const SalesEditor = {
             <th class="num">Line Total</th><th class="actions"></th>
           </tr></thead><tbody id="s-lines"></tbody>
         </table></div>
-        <div class="line-add"><button class="btn" id="s-add-line">+ Add line</button></div>
+        <div class="line-add"><button class="btn" id="s-add-line">+ Add line</button> <button class="btn" id="s-scan-line">▣ Scan item</button></div>
       </div>
 
       <div class="totals-row">
@@ -339,6 +339,43 @@ const SalesEditor = {
     refreshBalance();
 
     mount.querySelector('#s-add-line').onclick = () => { state.lines.push(this.blankLine()); renderLines(); };
+
+    const addLineByCode = async (code) => {
+      UI.loading(true, 'Looking up item…');
+      let it;
+      try { it = await API.findItemByCode(code); }
+      catch (e) { UI.loading(false); UI.toast(e.message, 'error'); return; }
+      UI.loading(false);
+      if (!it) { UI.toast('No item found for code: ' + code, 'error'); return; }
+      const ex = state.lines.find(l => String(l.item_id) === String(it.id));
+      if (ex) { ex.qty = Number(ex.qty || 0) + 1; }
+      else {
+        const ln = SalesEditor.blankLine();
+        ln.item_id = it.id; ln.description = it.name || ''; ln.qty = 1;
+        if (it.regular_price !== '' && it.regular_price != null) ln.unit_price = it.regular_price;
+        if (state.lines.length === 1 && !state.lines[0].item_id && !state.lines[0].description) state.lines = [];
+        state.lines.push(ln);
+      }
+      renderLines(); recompute();
+    };
+    const scanLineBtn = mount.querySelector('#s-scan-line');
+    if (scanLineBtn) scanLineBtn.onclick = async () => {
+      if (!window.Scan) { UI.toast('Scanner is still loading, try again.'); return; }
+      const code = await Scan.scan();
+      if (code) addLineByCode(code);
+    };
+    // preload an item that was scanned from the dashboard menu
+    if (window.__SCAN_PRELOAD && !state.id) {
+      const pid = window.__SCAN_PRELOAD.id; window.__SCAN_PRELOAD = null;
+      const pit = Sales.items.find(x => String(x.id) === String(pid));
+      if (pit) {
+        const ln = SalesEditor.blankLine();
+        ln.item_id = pit.id; ln.description = pit.name || ''; ln.qty = 1;
+        if (pit.regular_price !== '' && pit.regular_price != null) ln.unit_price = pit.regular_price;
+        if (state.lines.length === 1 && !state.lines[0].item_id && !state.lines[0].description) state.lines = [];
+        state.lines.push(ln); renderLines(); recompute();
+      }
+    }
     mount.querySelector('#s-customer').onchange = (e) => { state.customer_id = e.target.value; refreshBalance(); };
     const addCustBtn = mount.querySelector('#s-add-customer');
     if (addCustBtn) addCustBtn.onclick = () => CRUD.quickAdd('Customers', (rec) => {

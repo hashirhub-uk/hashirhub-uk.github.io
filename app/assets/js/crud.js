@@ -190,6 +190,15 @@ const CRUD = {
       });
     });
 
+    // inline scan (▣) next to scan-enabled fields
+    modal.querySelectorAll('.scan-btn').forEach(btn => btn.onclick = async () => {
+      if (!window.Scan) { UI.toast('Scanner is still loading, try again.'); return; }
+      const code = await Scan.scan();
+      if (!code) return;
+      const inp = modal.querySelector(`[name="${btn.dataset.field}"]`);
+      if (inp) inp.value = code;
+    });
+
     const close = () => modal.remove();
     modal.querySelectorAll('.modal-close').forEach(b => b.onclick = close);
     modal.addEventListener('click', e => { if (e.target === modal) close(); });
@@ -260,6 +269,9 @@ const CRUD = {
     } else {
       const t = f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : (f.type === 'password' ? 'password' : 'text'));
       input = `<input type="${t}" name="${f.key}"${f.step ? ` step="${f.step}"` : ''} value="${UI.escape(v)}">`;
+      if (f.scan) {
+        input = `<span class="input-with-btn">${input}<button type="button" class="btn scan-btn" data-field="${f.key}" title="Scan barcode / QR">▣</button></span>`;
+      }
     }
     return `<label class="field${wide}"><span class="field-label">${UI.escape(f.label)}${req}</span>${input}</label>`;
   },

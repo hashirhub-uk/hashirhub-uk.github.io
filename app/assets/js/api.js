@@ -69,6 +69,7 @@ const API = {
     return json.data; // { api_url, company_name }
   },
 
+  findItemByCode(code)       { return this.call("findItemByCode", { code }); },
   changePassword(oldPw, newPw) {
     return this.call("changePassword", { old_password: oldPw, new_password: newPw });
   },
