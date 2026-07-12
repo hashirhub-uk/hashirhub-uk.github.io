@@ -496,3 +496,14 @@ code { font-family: "IBM Plex Mono", monospace; background: #eef1f5; padding: 1p
 
 /* v7.24 — dashboard Chart.js canvases */
 .dash-chartjs { position: relative; height: 300px; padding: 4px 8px 10px; }
+
+/* v7.26 — type-to-search combobox */
+.ac-wrap { position: relative; flex: 1; }
+.ac-hidden { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
+.ac-input { width: 100%; padding: 8px 10px; border: 1px solid #d7dee0; border-radius: 8px; font: inherit; background: #fff; }
+.ac-input:focus { outline: none; border-color: #0f766e; }
+.ac-menu { display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 60; margin-top: 3px; background: #fff; border: 1px solid #d7dee0; border-radius: 8px; box-shadow: 0 10px 28px rgba(0,0,0,.14); max-height: 240px; overflow: auto; }
+.ac-menu.show { display: block; }
+.ac-opt { padding: 8px 10px; cursor: pointer; font-size: 13px; }
+.ac-opt:hover { background: #e9f1f0; color: #0f766e; }
+.ac-empty { padding: 8px 10px; color: #94a3b8; font-size: 13px; }

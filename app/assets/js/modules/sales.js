@@ -377,6 +377,7 @@ const SalesEditor = {
       }
     }
     mount.querySelector('#s-customer').onchange = (e) => { state.customer_id = e.target.value; refreshBalance(); };
+    UI.enhanceSelect(mount.querySelector('#s-customer'), 'Type customer name…');
     const addCustBtn = mount.querySelector('#s-add-customer');
     if (addCustBtn) addCustBtn.onclick = () => CRUD.quickAdd('Customers', (rec) => {
       Sales.customers.push(rec);
@@ -424,6 +425,7 @@ const SalesEditor = {
       setQtyHint(itemSel.value);
       recompute();
     };
+    UI.enhanceSelect(itemSel, 'Type item name…');
     if (state.lines[i].item_id) {
       setQtyHint(state.lines[i].item_id);
       const it0 = Sales.items.find(x => String(x.id) === String(state.lines[i].item_id));

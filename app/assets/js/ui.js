@@ -87,3 +87,46 @@ const UI = {
 };
 
 window.UI = UI;
+
+
+// v7.26 — type-to-search: enhance any <select> into a searchable combobox.
+// Keeps the original <select> (value + change events) intact.
+UI.enhanceSelect = function (selectEl, placeholder) {
+  if (!selectEl || selectEl.__ac) return;
+  selectEl.__ac = true;
+  var wrap = document.createElement('div');
+  wrap.className = 'ac-wrap';
+  selectEl.parentNode.insertBefore(wrap, selectEl);
+  wrap.appendChild(selectEl);
+  selectEl.classList.add('ac-hidden');
+  var input = document.createElement('input');
+  input.type = 'text'; input.className = 'ac-input'; input.autocomplete = 'off';
+  input.placeholder = placeholder || 'Type 2+ characters…';
+  var menu = document.createElement('div'); menu.className = 'ac-menu';
+  wrap.appendChild(input); wrap.appendChild(menu);
+  function curText() { var o = selectEl.options[selectEl.selectedIndex]; return (o && o.value !== '') ? o.text : ''; }
+  function sync() { input.value = curText(); }
+  sync();
+  function opts() { return Array.prototype.slice.call(selectEl.options).filter(function (o) { return o.value !== ''; }); }
+  function draw(q) {
+    var ql = q.toLowerCase();
+    var m = opts().filter(function (o) { return o.text.toLowerCase().indexOf(ql) !== -1; }).slice(0, 40);
+    menu.innerHTML = m.length
+      ? m.map(function (o) { return '<div class="ac-opt" data-v="' + encodeURIComponent(o.value) + '">' + UI.escape(o.text) + '</div>'; }).join('')
+      : '<div class="ac-empty">No matches</div>';
+    menu.classList.add('show');
+    Array.prototype.forEach.call(menu.querySelectorAll('.ac-opt'), function (el) {
+      el.onmousedown = function (e) {
+        e.preventDefault();
+        selectEl.value = decodeURIComponent(el.getAttribute('data-v'));
+        input.value = el.textContent;
+        menu.classList.remove('show');
+        selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+    });
+  }
+  input.addEventListener('input', function () { var q = input.value.trim(); if (q.length < 2) { menu.classList.remove('show'); return; } draw(q); });
+  input.addEventListener('focus', function () { var q = input.value.trim(); if (q.length >= 2) draw(q); });
+  input.addEventListener('blur', function () { setTimeout(function () { menu.classList.remove('show'); sync(); }, 160); });
+  return input;
+};

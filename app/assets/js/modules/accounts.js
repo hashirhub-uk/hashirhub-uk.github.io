@@ -372,6 +372,7 @@ Router.register('receive-payments', async (mount) => {
     tableEl.querySelectorAll('.rp-amt').forEach(inp => { total += Number(inp.value || 0); });
     mount.querySelector('#rp-total').textContent = UI.money(total);
   };
+  UI.enhanceSelect(mount.querySelector('#rp-cust'), 'Type customer name…');
   mount.querySelector('#rp-cust').onchange = (e) => {
     const cid = e.target.value;
     rows = invoices.filter(inv => String(inv.customer_id) === String(cid) && Number(inv.balance) > 0 && String(inv.status) !== 'deleted');

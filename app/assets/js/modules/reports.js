@@ -74,6 +74,12 @@ function docLink(route, id, label) {
   if (!route || !id || !text) return text;
   return `<a class="doc-link" href="#${route}?id=${encodeURIComponent(id)}">${text}</a>`;
 }
+function navLink(route, label) {
+  const text = UI.escape(label == null ? '' : label);
+  if (!route || !text) return text;
+  return `<a class="doc-link" href="#${route}">${text}</a>`;
+}
+const TX_ROUTES = { 'Invoices':'invoices', 'Sales Receipts':'sales-receipts', 'Credit Memos':'credit-memos', 'Sales Orders':'sales-orders', 'Quotations':'quotations', 'Bills':'bills', 'Purchase Returns':'bills', 'Purchase Orders':'purchase-orders', 'Expenses':'expenses' };
 
 function reportChips(cat) {
   return `<div class="report-chips">${cat.reports.map(r => r.route
@@ -336,7 +342,7 @@ Router.register("report-trial-balance", (m) => reportScreen(m, {
       <table class="data-table report-table">
         <thead><tr><th>Account</th><th>Type</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
         <tbody>
-          ${(data.lines||[]).map(r=>`<tr><td>${UI.escape(r.account)}</td><td>${UI.escape(r.type)}</td>
+          ${(data.lines||[]).map(r=>`<tr><td>${docLink("report-general-ledger", r.account_id, r.account)}</td><td>${UI.escape(r.type)}</td>
             <td class="num">${r.debit?UI.money(r.debit):""}</td><td class="num">${r.credit?UI.money(r.credit):""}</td></tr>`).join("")}
           ${!(data.lines||[]).length?`<tr><td colspan="4" style="text-align:center;padding:28px">No account activity found.</td></tr>`:""}
           <tr class="rpt-grand"><td colspan="2"><strong>Total</strong></td>
@@ -357,7 +363,7 @@ Router.register("report-income-customer", (m) => reportScreen(m, {
       <table class="data-table report-table">
         <thead><tr><th>Customer</th><th class="num">Amount</th></tr></thead>
         <tbody>
-          ${(data.lines||[]).map(r=>`<tr><td>${UI.escape(r.customer)}</td><td class="num">${UI.money(r.amount)}</td></tr>`).join("")}
+          ${(data.lines||[]).map(r=>`<tr><td>${docLink("report-customer-statement", r.customer_id, r.customer)}</td><td class="num">${UI.money(r.amount)}</td></tr>`).join("")}
           ${!(data.lines||[]).length?`<tr><td colspan="2" style="text-align:center;padding:28px">No income in this period.</td></tr>`:""}
           <tr class="rpt-grand"><td><strong>Total</strong></td><td class="num"><strong>${UI.money(data.total||0)}</strong></td></tr>
         </tbody>
@@ -375,7 +381,7 @@ Router.register("report-transactions-summary", (m) => reportScreen(m, {
       <table class="data-table report-table">
         <thead><tr><th>Transaction Type</th><th class="num">Count</th><th class="num">Total</th></tr></thead>
         <tbody>
-          ${(data.rows||[]).map(r=>`<tr><td>${UI.escape(r.label)}</td><td class="num">${r.count}</td><td class="num">${UI.money(r.total)}</td></tr>`).join("")}
+          ${(data.rows||[]).map(r=>`<tr><td>${navLink(TX_ROUTES[r.label], r.label)}</td><td class="num">${r.count}</td><td class="num">${UI.money(r.total)}</td></tr>`).join("")}
           <tr class="rpt-grand"><td><strong>Total</strong></td><td class="num"><strong>${data.grand_count||0}</strong></td>
             <td class="num"><strong>${UI.money(data.grand_total||0)}</strong></td></tr>
         </tbody>
@@ -439,6 +445,7 @@ Router.register("report-customer-statement", (m, p) => reportScreen(m, {
     const custs = await API.list("Customers");
     const sel = mount.querySelector("#rpt-customer");
     custs.forEach(c => sel.add(new Option(c.name, c.id)));
+    UI.enhanceSelect(sel, "Type customer name…");
     if (params && params.id) { sel.value = params.id; mount.querySelector("#rpt-run").click(); }
   },
   render(data, {from, to, co}) {
@@ -464,34 +471,34 @@ Router.register("report-customer-statement", (m, p) => reportScreen(m, {
 }, p));
 
 Router.register("report-account-statement", (m, p) => reportScreen(m, {
-  title: "Account Statement", action: "reportAccountStatement", mode: "range",
-  extraFilters: `<label class="field"><span class="field-label">Account</span>
-    <select id="rpt-account"><option value="">Select an account…</option></select></label>`,
-  gatherExtra(mount) { return { account_id: mount.querySelector("#rpt-account").value }; },
+  title: "Account Statement", action: "reportCustomerStatement", mode: "range",
+  extraFilters: `<label class="field"><span class="field-label">Customer</span>
+    <select id="rpt-customer"><option value="">Select a customer…</option></select></label>`,
+  gatherExtra(mount) { return { customer_id: mount.querySelector("#rpt-customer").value }; },
   async init(mount, params) {
-    const accts = await API.list("accounts");
-    const sel = mount.querySelector("#rpt-account");
-    accts.forEach(a => sel.add(new Option(a.account_name, a.id)));
+    const custs = await API.list("Customers");
+    const sel = mount.querySelector("#rpt-customer");
+    custs.forEach(c => sel.add(new Option(c.name, c.id)));
+    UI.enhanceSelect(sel, "Type customer name…");
     if (params && params.id) { sel.value = params.id; mount.querySelector("#rpt-run").click(); }
   },
   render(data, {from, to, co}) {
     if (data.need_pick) {
-      return `<div class="card"><div class="empty"><p>Select an account above and click View to see its statement.</p></div></div>`;
+      return `<div class="card"><div class="empty"><p>Select a customer above and click View to see their statement.</p></div></div>`;
     }
     return `<div class="card report-doc no-print-card">
       <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
         <div class="report-title">Account Statement — ${UI.escape(data.name||"")}</div>
         <div class="report-period">${UI.date(from)} — ${UI.date(to)}</div></div>
       <table class="data-table report-table">
-        <thead><tr><th>Date</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
+        <thead><tr><th>Date</th><th>Type</th><th>Number</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
         <tbody>
-          <tr class="rpt-subtotal"><td colspan="4">Opening Balance</td><td class="num">${UI.money(data.opening||0)}</td></tr>
-          ${(data.lines||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.description||"")}</td>
-          <td class="num">${r.debit?UI.money(r.debit):""}</td>
-          <td class="num">${r.credit?UI.money(r.credit):""}</td>
-          <td class="num">${UI.money(r.balance)}</td></tr>`).join("")}
-          ${!(data.lines||[]).length?`<tr><td colspan="5" style="text-align:center;padding:20px">No activity in this period.</td></tr>`:""}
-          <tr class="rpt-grand"><td colspan="4"><strong>Closing Balance</strong></td><td class="num"><strong>${UI.money(data.closing||0)}</strong></td></tr>
+          <tr class="rpt-subtotal"><td colspan="5">Opening Balance</td><td class="num">${UI.money(data.opening||0)}</td></tr>
+          ${(data.lines||[]).map(r=>`<tr><td>${UI.escape(UI.date(r.date))}</td><td>${UI.escape(r.type)}</td>
+          <td>${docLink(DOC_DETAIL_ROUTES[r.doc], r.id, r.number||"")}</td><td class="num">${r.debit?UI.money(r.debit):""}</td>
+          <td class="num">${r.credit?UI.money(r.credit):""}</td><td class="num">${UI.money(r.balance)}</td></tr>`).join("")}
+          ${!(data.lines||[]).length?`<tr><td colspan="6" style="text-align:center;padding:20px">No activity in this period.</td></tr>`:""}
+          <tr class="rpt-grand"><td colspan="5"><strong>Closing Balance</strong></td><td class="num"><strong>${UI.money(data.closing||0)}</strong></td></tr>
         </tbody>
       </table></div>`;
   }

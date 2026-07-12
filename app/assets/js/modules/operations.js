@@ -569,6 +569,7 @@ async function claimEditor(mount, id) {
   };
   render();
   const rewireCust = () => { mount.querySelector('#cl-cust').onchange = (e) => { state.customer_id = e.target.value; }; };
+  UI.enhanceSelect(mount.querySelector('#cl-cust'), 'Type customer name…');
   rewireCust();
   mount.querySelector('#cl-add-cust').onclick = () => newCustomerModalOp((rec) => {
     state.customer_id = rec.id;
