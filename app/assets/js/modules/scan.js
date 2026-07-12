@@ -95,9 +95,30 @@
     try { item = await API.findItemByCode(code); }
     catch (e) { UI.loading(false); UI.toast(e.message, 'error'); return; }
     UI.loading(false);
-    if (!item) { UI.toast('No item found for code: ' + code, 'error'); return; }
+    if (!item) { showNotFound(code); return; }
     showMenu(item);
   };
+
+  function showNotFound(code) {
+    injectStyles();
+    var ov = document.createElement('div'); ov.className = 'scan-overlay';
+    ov.innerHTML =
+      '<div class="scan-menu"><div class="scan-menu-head"><strong>Item not found</strong>' +
+      '<span>No item matches code: ' + esc(code) + '</span>' +
+      '<button class="scan-x" type="button">\u2715</button></div>' +
+      '<div class="scan-menu-body">' +
+      '<button class="scan-opt" data-a="add" type="button">\u2795 Add this item</button>' +
+      '<button class="scan-opt" data-a="cancel" type="button">Cancel</button>' +
+      '</div></div>';
+    document.body.appendChild(ov);
+    function close() { if (ov.parentNode) ov.parentNode.removeChild(ov); }
+    ov.querySelector('.scan-x').onclick = close;
+    ov.onclick = function (e) { if (e.target === ov) close(); };
+    ov.querySelector('[data-a=cancel]').onclick = close;
+    ov.querySelector('[data-a=add]').onclick = function () {
+      window.__SCAN_NEWITEM_CODE = code; close(); Router.go('new-item');
+    };
+  }
 
   function optBtn(a, label) { return '<button class="scan-opt" data-a="' + a + '" type="button">' + label + '</button>'; }
 

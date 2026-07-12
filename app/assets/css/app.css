@@ -482,3 +482,17 @@ code { font-family: "IBM Plex Mono", monospace; background: #eef1f5; padding: 1p
 .nav-subgroup > .nav-group-head { font-size: 13px; padding-left: 26px; opacity: .9; }
 .nav-subgroup > .nav-group-body { padding-left: 8px; margin: 1px 0 4px; }
 .nav-subgroup .nav-link { padding-left: 30px; font-size: 13px; }
+
+/* v7.24 — clickable document numbers / names in lists and reports */
+.link-cell { color: #0f766e; cursor: pointer; text-decoration: none; }
+.link-cell:hover { text-decoration: underline; }
+.link-cell strong { color: inherit; }
+.doc-link { color: #0f766e; cursor: pointer; font-weight: 600; text-decoration: none; }
+.doc-link:hover { text-decoration: underline; }
+.doc-link strong { color: inherit; }
+
+/* v7.24 — expired inventory */
+.expired-date { color: #dc2626; font-weight: 600; }
+
+/* v7.24 — dashboard Chart.js canvases */
+.dash-chartjs { position: relative; height: 300px; padding: 4px 8px 10px; }

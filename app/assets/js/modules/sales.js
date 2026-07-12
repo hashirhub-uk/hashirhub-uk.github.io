@@ -146,7 +146,7 @@ async function buildSalesList(mount, doc) {
         const st = doc.canPay ? `<td>${Sales.statusBadge(r.status)}</td>` : '';
         const pay = doc.canPay ? `<button class="link-btn" data-pay="${UI.escape(r.id)}">Pay</button>` : '';
         return `<tr>
-          <td><strong>${UI.escape(r[doc.numberField])}</strong></td>
+          <td><a class="doc-link" data-view="${UI.escape(r.id)}"><strong>${UI.escape(r[doc.numberField])}</strong></a></td>
           <td>${UI.escape(UI.date(r.date))}</td>
           <td>${UI.escape(docCustomer(doc, r))}</td>${due}
           <td class="num">${UI.money(r.total)}</td>${bal}${st}
@@ -201,7 +201,7 @@ const SalesEditor = {
 
     const rec = existing ? (existing.invoice || existing.receipt || existing.record) : {};
     const exItems = existing ? existing.items : [];
-    const today = new Date().toISOString().slice(0, 10);
+    const _d = new Date(); const today = _d.getFullYear() + '-' + String(_d.getMonth()+1).padStart(2,'0') + '-' + String(_d.getDate()).padStart(2,'0');
     const state = {
       doc, id: id || null,
       customer_id: rec.customer_id || (doc.walkIn ? 'walkin' : ''),
@@ -626,7 +626,7 @@ const PaymentModal = {
       <div class="modal-head"><h2>Record Payment — ${UI.escape(inv.invoice_no)}</h2>
         <button class="icon-btn modal-close">✕</button></div>
       <form class="modal-body"><div class="form-grid">
-        <label class="field"><span class="field-label">Date</span><input type="date" name="date" value="${new Date().toISOString().slice(0,10)}"></label>
+        <label class="field"><span class="field-label">Date</span><input type="date" name="date" value="${(function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})()}"></label>
         <label class="field"><span class="field-label">Amount <span class="req">*</span></span><input type="number" step="0.01" name="amount" value="${UI.escape(inv.balance)}"></label>
         <label class="field"><span class="field-label">Method</span>
           <select name="method"><option>Cash</option><option>Bank Transfer</option><option>Card</option><option>Cheque</option><option>Other</option></select></label>

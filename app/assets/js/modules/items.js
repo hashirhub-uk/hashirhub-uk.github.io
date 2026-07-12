@@ -11,7 +11,8 @@ const itemsCfg = {
     { key: 'name',            label: 'Name' },
     { key: 'category_id',     label: 'Category',       ref: 'Categories' },
     { key: 'brand_id',        label: 'Brand',          ref: 'Brands' },
-    { key: 'cost_price',      label: 'Purchase Price', type: 'money' },
+    { key: 'purchase_price',  label: 'Purchase Price', type: 'money' },
+    { key: 'cost_price',      label: 'Avg Cost',       type: 'money' },
     { key: 'regular_price',   label: 'Regular Price',  type: 'money' },
     { key: 'wholesale_price', label: 'Wholesale Price',type: 'money' },
     { key: 'on_hand',         label: 'Qty on Hand',    type: 'number' },
@@ -26,7 +27,7 @@ const itemsCfg = {
     { key: 'item_type',   label: 'Type', type: 'select', tab: 'General', default: 'Inventory Item',
       options: [{ value: 'Inventory Item', label: 'Inventory Item' }, { value: 'Service', label: 'Service' }, { value: 'Non-Inventory', label: 'Non-Inventory' }] },
     { key: 'name',        label: 'Item Name / Number', required: true, wide: true, tab: 'General' },
-    { key: 'sku',         label: 'UPC / Code (auto-assigned if left blank)', tab: 'General', scan: true },
+    { key: 'sku',         label: 'UPC (auto-assigned by the system)', tab: 'General', readonly: true },
     { key: 'unique_id',   label: 'Unique ID (your own searchable code, optional)', tab: 'General', scan: true },
     { key: 'category_id', label: 'Category',  type: 'select', ref: 'Categories', tab: 'General' },
     { key: 'brand_id',    label: 'Brand',     type: 'select', ref: 'Brands', quickAdd: 'Brands', tab: 'General' },
@@ -35,7 +36,8 @@ const itemsCfg = {
     { key: 'size',        label: 'Size', tab: 'General' },
     { key: 'attributes',  label: 'Attributes', tab: 'General' },
     { key: 'expiry_date', label: 'Expiry date', type: 'date', tab: 'General' },
-    { key: 'cost_price',      label: 'Purchase Price',  type: 'number', step: '0.01', tab: 'Pricing & Accounts' },
+    { key: 'purchase_price',  label: 'Purchase Price',  type: 'number', step: '0.01', tab: 'Pricing & Accounts' },
+    { key: 'cost_price',      label: 'Average Cost (auto from bills)', type: 'number', step: '0.01', readonly: true, tab: 'Pricing & Accounts' },
     { key: 'regular_price',   label: 'Regular Price',   type: 'number', step: '0.01', tab: 'Pricing & Accounts' },
     { key: 'wholesale_price', label: 'Wholesale Price', type: 'number', step: '0.01', tab: 'Pricing & Accounts' },
     { key: 'commission',      label: 'Commission',      type: 'number', step: '0.01', tab: 'Pricing & Accounts' },
@@ -51,7 +53,13 @@ const itemsCfg = {
 };
 
 Router.register('items',    (m) => CRUD.page(m, itemsCfg));
-Router.register('new-item', (m) => CRUD.page(m, itemsCfg, { openNew: true }));
+Router.register('new-item', (m) => {
+  CRUD.page(m, itemsCfg, { openNew: true });
+  if (window.__SCAN_NEWITEM_CODE) {
+    var code = window.__SCAN_NEWITEM_CODE; window.__SCAN_NEWITEM_CODE = null;
+    setTimeout(function () { var inp = document.querySelector('[name="unique_id"]'); if (inp) inp.value = code; }, 350);
+  }
+});
 
 /* =====================================================================
    ITEM SEARCH — find an item, see stock on hand + movement history
@@ -114,6 +122,79 @@ Router.register('item-search', async (mount) => {
 });
 
 /* =====================================================================
+   EXPIRED INVENTORY — items whose expiry date is on/before today (v7.24)
+   ===================================================================== */
+Router.register('expired-inventory', async (mount) => {
+  UI.loading(true);
+  let items, cats = {}, brands = {}, supps = {};
+  try {
+    const [it, c, b, s] = await Promise.all([API.list('Items'), API.list('Categories'), API.list('Brands'), API.list('Suppliers')]);
+    items = it;
+    c.forEach(x => cats[String(x.id)] = x.name);
+    b.forEach(x => brands[String(x.id)] = x.name);
+    s.forEach(x => supps[String(x.id)] = x.name);
+  } catch (e) { UI.loading(false); mount.innerHTML = `<div class="card"><div class="empty">${UI.icon('alert')}<h3>Couldn't load items</h3><p>${UI.escape(e.message)}</p></div></div>`; return; }
+  UI.loading(false);
+
+  const _d = new Date();
+  const today = _d.getFullYear() + '-' + String(_d.getMonth() + 1).padStart(2, '0') + '-' + String(_d.getDate()).padStart(2, '0');
+  const expKey = (v) => {
+    if (!v) return '';
+    const s = String(v);
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return m[1] + '-' + m[2] + '-' + m[3];
+    const d = new Date(s);
+    return isNaN(d) ? '' : d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  };
+  const expired = items.filter(it => { const k = expKey(it.expiry_date); return k && k <= today; })
+    .sort((a, b) => expKey(a.expiry_date).localeCompare(expKey(b.expiry_date)));
+
+  mount.innerHTML = `
+    <div class="page-head"><h1>Expired Inventory</h1><span class="page-sub" id="ei-count"></span>
+      <div class="page-actions"><input id="ei-q" class="search-input" placeholder="Search…"></div>
+    </div>
+    <div class="card no-pad"><div class="table-wrap" id="ei-table"></div></div>`;
+
+  const draw = (list) => {
+    mount.querySelector('#ei-count').textContent = `${list.length} expired item${list.length === 1 ? '' : 's'}`;
+    const t = mount.querySelector('#ei-table');
+    if (!list.length) { t.innerHTML = `<div class="empty">${UI.icon('check')}<h3>No expired items.</h3></div>`; return; }
+    t.innerHTML = `<table class="data-table"><thead><tr>
+        <th>ID</th><th>UPC</th><th>Brand</th><th>Name</th><th>Category</th><th>Supplier</th>
+        <th>Size</th><th>Attributes</th><th>Expiry Date</th><th>Unique ID</th><th class="actions">Action</th>
+      </tr></thead><tbody>${list.map(it => `<tr>
+        <td>${UI.escape(it.id)}</td>
+        <td>${UI.escape(it.sku || '')}</td>
+        <td>${UI.escape(brands[String(it.brand_id)] || '—')}</td>
+        <td><strong>${UI.escape(it.name)}</strong></td>
+        <td>${UI.escape(cats[String(it.category_id)] || '—')}</td>
+        <td>${UI.escape(supps[String(it.supplier_id)] || '—')}</td>
+        <td>${UI.escape(it.size || '—')}</td>
+        <td>${UI.escape(it.attributes || '—')}</td>
+        <td class="expired-date">${UI.escape(UI.date(it.expiry_date))}</td>
+        <td>${UI.escape(it.unique_id || '—')}</td>
+        <td class="actions"><a class="link-cell" data-open="${UI.escape(it.id)}">Open</a></td>
+      </tr>`).join('')}</tbody></table>`;
+    t.querySelectorAll('[data-open]').forEach(a => a.onclick = () => {
+      const it = expired.find(x => String(x.id) === String(a.dataset.open));
+      Router.go('item-search');
+      setTimeout(() => {
+        const inp = document.querySelector('#is-q');
+        if (inp && it) { inp.value = it.sku || it.name; inp.dispatchEvent(new Event('input')); }
+      }, 400);
+    });
+  };
+  const q = mount.querySelector('#ei-q');
+  const apply = () => {
+    const s = q.value.trim().toLowerCase();
+    draw(!s ? expired : expired.filter(it =>
+      (it.name + ' ' + (it.sku || '') + ' ' + (it.unique_id || '') + ' ' + (brands[String(it.brand_id)] || '') + ' ' + (cats[String(it.category_id)] || '') + ' ' + (supps[String(it.supplier_id)] || '')).toLowerCase().indexOf(s) !== -1));
+  };
+  q.oninput = apply;
+  apply();
+});
+
+/* =====================================================================
    PRICE MANAGER — bulk edit regular / wholesale prices
    ===================================================================== */
 Router.register('price-manager', async (mount) => {
@@ -145,15 +226,31 @@ Router.register('price-manager', async (mount) => {
     const list = items.filter(it => (!cat || String(it.category_id) === cat) && (!br || String(it.brand_id) === br) && (!sp || String(it.supplier_id) === sp));
     const t = mount.querySelector('#pm-table');
     if (!list.length) { t.innerHTML = `<div class="empty"><p>No items match these filters.</p></div>`; return; }
-    t.innerHTML = `<table class="data-table"><thead><tr><th>UPC</th><th>Item</th><th class="num">Regular Price</th><th class="num">Wholesale</th></tr></thead>
+    t.innerHTML = `<table class="data-table"><thead><tr>
+        <th>UPC</th><th>Item</th>
+        <th class="num">Purchase Price</th><th class="num">Average Cost</th>
+        <th class="num">Regular Price</th><th class="num">Wholesale</th><th class="num">Qty on Hand</th>
+      </tr></thead>
       <tbody>${list.map(it => `<tr data-id="${UI.escape(it.id)}">
         <td>${UI.escape(it.sku || '')}</td><td>${UI.escape(it.name)}</td>
-        <td><input class="pm-r num" type="number" step="0.01" value="${UI.escape(it.regular_price || '')}"></td>
-        <td><input class="pm-w num" type="number" step="0.01" value="${UI.escape(it.wholesale_price || '')}"></td>
+        <td><input class="pm-p num" type="number" step="0.01" value="${UI.escape(it.purchase_price != null ? it.purchase_price : '')}"></td>
+        <td class="num">${UI.money(it.cost_price)}</td>
+        <td><input class="pm-r num" type="number" step="0.01" value="${UI.escape(it.regular_price != null ? it.regular_price : '')}"></td>
+        <td><input class="pm-w num" type="number" step="0.01" value="${UI.escape(it.wholesale_price != null ? it.wholesale_price : '')}"></td>
+        <td class="num">${UI.escape(it.on_hand != null ? it.on_hand : '')}</td>
       </tr>`).join('')}</tbody></table>`;
     t.querySelectorAll('tr[data-id]').forEach(tr => {
       const id = tr.dataset.id;
-      const mark = () => { edits[id] = { id, regular_price: tr.querySelector('.pm-r').value, wholesale_price: tr.querySelector('.pm-w').value }; refreshSaveState(); };
+      const mark = () => {
+        edits[id] = {
+          id,
+          purchase_price: tr.querySelector('.pm-p').value,
+          regular_price: tr.querySelector('.pm-r').value,
+          wholesale_price: tr.querySelector('.pm-w').value
+        };
+        refreshSaveState();
+      };
+      tr.querySelector('.pm-p').oninput = mark;
       tr.querySelector('.pm-r').oninput = mark;
       tr.querySelector('.pm-w').oninput = mark;
     });
@@ -166,11 +263,17 @@ Router.register('price-manager', async (mount) => {
     if (!updates.length) return;
     UI.loading(true, 'Updating prices…');
     try {
-      const r = await API.call('updatePrices', { updates });
-      updates.forEach(u => { const it = items.find(x => String(x.id) === String(u.id)); if (it) { it.regular_price = u.regular_price; it.wholesale_price = u.wholesale_price; } });
+      let n = 0;
+      for (const u of updates) {
+        const patch = { purchase_price: u.purchase_price, regular_price: u.regular_price, wholesale_price: u.wholesale_price };
+        await API.update('Items', u.id, patch);
+        const it = items.find(x => String(x.id) === String(u.id));
+        if (it) Object.assign(it, patch);
+        n++;
+      }
       Object.keys(edits).forEach(k => delete edits[k]);
       refreshSaveState();
-      UI.loading(false); UI.toast(`Updated ${r.updated} item(s).`, 'success');
+      UI.loading(false); UI.toast(`Updated ${n} item(s).`, 'success');
     } catch (e) { UI.loading(false); UI.toast(e.message, 'error'); }
   };
   draw();

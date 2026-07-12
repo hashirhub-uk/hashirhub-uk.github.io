@@ -139,8 +139,9 @@ Router.register("home", async (mount) => {
 
       const c = x.charts;
       mount.querySelector("#dash-charts").innerHTML =
-        dashChart("Sales vs Receivables Collection", c.labels, { name: "Sales", color: "#0f766e", values: c.sales }, { name: "Collection", color: "#f59e0b", values: c.collection }) +
-        dashChart("Gross Profit vs Net Income", c.labels, { name: "Gross Profit", color: "#2563eb", values: c.gross_profit }, { name: "Net Income", color: "#16a34a", values: c.net_income });
+        dashChartCard("dash-chart-sales", "Sales vs Receivables Collection") +
+        dashChartCard("dash-chart-profit", "Gross Profit vs Net Income");
+      renderDashCharts(mount, c);
     } catch (e) { mount.querySelector("#dash-charts").innerHTML = `<div class="card"><div class="empty"><p>Charts unavailable: ${UI.escape(e.message)}</p></div></div>`; }
 
   } catch (e) {
@@ -192,54 +193,90 @@ function openRangeEditor(range, onApply) {
     close(); onApply(from, to);
   };
 }
-function dashChart(title, labels, sA, sB) {
-  const W = 560, H = 220, padL = 52, padR = 12, padT = 14, padB = 28;
-  const bh = H - padT - padB, bw = W - padL - padR;
-  const n  = labels.length;
-  const allVals = [...sA.values, ...sB.values].filter(v => v > 0);
-  const maxV = allVals.length ? Math.max(...allVals) : 1;
-
-  // nice y-axis tick values
-  const ticks = 4;
-  const tickStep = maxV / ticks;
-  let yGridLines = '';
-  for (let t = 0; t <= ticks; t++) {
-    const val = t * tickStep;
-    const yy  = padT + bh - (val / maxV) * bh;
-    const fmt  = val >= 1000000 ? (val/1000000).toFixed(1)+'M' : val >= 1000 ? (val/1000).toFixed(0)+'K' : val.toFixed(0);
-    yGridLines += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W-padR}" y2="${yy.toFixed(1)}" stroke="#e2e8f0" stroke-width="1"/>`;
-    if (t > 0) yGridLines += `<text x="${padL-4}" y="${(yy+4).toFixed(1)}" text-anchor="end" class="ch-x">${UI.escape(fmt)}</text>`;
-  }
-
-  // coordinates for both series
-  const px = i => padL + (n > 1 ? (i / (n - 1)) * bw : bw / 2);
-  const py = v => padT + bh - Math.max(0, (v / maxV)) * bh;
-
-  const makePath = (vals) => vals.map((v, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(v).toFixed(1)}`).join(' ');
-
-  // x-axis labels — show every Nth label so they don't crowd
-  const skip = Math.max(1, Math.ceil(n / 10));
-  let xLabels = '';
-  labels.forEach((lab, i) => {
-    if (i % skip === 0 || i === n - 1)
-      xLabels += `<text x="${px(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="ch-x">${UI.escape(lab)}</text>`;
+/* ---- v7.24: Chart.js line charts (lazy-loaded from CDN) ---- */
+let _chartJsPromise = null;
+function loadChartJs() {
+  if (window.Chart) return Promise.resolve();
+  if (_chartJsPromise) return _chartJsPromise;
+  _chartJsPromise = new Promise((res, rej) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js";
+    sc.onload = () => res();
+    sc.onerror = () => { _chartJsPromise = null; rej(new Error("Could not load the chart library. Check your internet connection.")); };
+    document.head.appendChild(sc);
   });
+  return _chartJsPromise;
+}
 
-  // dot on last data point for each series
-  const lastA = sA.values[n-1], lastB = sB.values[n-1];
-  const dots = `
-    <circle cx="${px(n-1).toFixed(1)}" cy="${py(lastA).toFixed(1)}" r="3" fill="${sA.color}"/>
-    <circle cx="${px(n-1).toFixed(1)}" cy="${py(lastB).toFixed(1)}" r="3" fill="${sB.color}"/>`;
+function dashChartCard(id, title) {
+  return `<div class="card no-pad">
+    <div class="card-head" style="padding:14px 16px 0;"><h2>${UI.escape(title)}</h2></div>
+    <div class="dash-chartjs"><canvas id="${id}"></canvas></div>
+  </div>`;
+}
 
-  return `<div class="card">
-    <div class="card-head"><h2>${UI.escape(title)}</h2></div>
-    <div class="chart-legend"><span><i style="background:${sA.color}"></i>${UI.escape(sA.name)}</span><span><i style="background:${sB.color}"></i>${UI.escape(sB.name)}</span></div>
-    <svg viewBox="0 0 ${W} ${H}" class="dash-chart" preserveAspectRatio="xMidYMid meet">
-      ${yGridLines}
-      <line x1="${padL}" y1="${padT+bh}" x2="${W-padR}" y2="${padT+bh}" class="ch-axis"/>
-      <path d="${makePath(sA.values)}" fill="none" stroke="${sA.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
-      <path d="${makePath(sB.values)}" fill="none" stroke="${sB.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5,3"/>
-      ${dots}
-      ${xLabels}
-    </svg></div>`;
+function dashLine(name, color, values) {
+  return {
+    label: name, data: values,
+    borderColor: color, backgroundColor: color,
+    borderWidth: 2.5, tension: 0.35,
+    pointRadius: 2.5, pointHoverRadius: 5, fill: false
+  };
+}
+
+async function renderDashCharts(mount, c) {
+  try { await loadChartJs(); }
+  catch (e) {
+    const holder = mount.querySelector("#dash-charts");
+    if (holder) holder.innerHTML = `<div class="card"><div class="empty"><p>Charts unavailable: ${UI.escape(e.message)}</p></div></div>`;
+    return;
+  }
+  // Expenses = Gross Profit − Net Income (fallback when the backend
+  // doesn't return the series directly)
+  const expenses = (c.expenses && c.expenses.length)
+    ? c.expenses
+    : (c.gross_profit || []).map((g, i) => Number(g || 0) - Number((c.net_income || [])[i] || 0));
+
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: {
+      legend: { position: "top", labels: { boxWidth: 12, boxHeight: 12, usePointStyle: false } },
+      tooltip: {
+        mode: "index", intersect: false,
+        callbacks: { label: (ctx) => ` ${ctx.dataset.label}: ${UI.money(ctx.parsed.y)}` }
+      }
+    },
+    scales: {
+      y: { beginAtZero: true, ticks: { callback: (v) => v >= 1000000 ? (v / 1000000) + "M" : v >= 1000 ? (v / 1000) + "K" : v } },
+      x: { ticks: { maxTicksLimit: 10, maxRotation: 0 } }
+    }
+  };
+
+  const el1 = mount.querySelector("#dash-chart-sales");
+  const el2 = mount.querySelector("#dash-chart-profit");
+  if (!el1 || !el2) return; // user navigated away while the library loaded
+  // destroy any previous Chart instances before re-creating on the same canvases
+  window.__dashCharts = window.__dashCharts || [];
+  window.__dashCharts.forEach(ch => { try { ch.destroy(); } catch (e) {} });
+  window.__dashCharts = [];
+  [el1, el2].forEach(el => { const prev = Chart.getChart(el); if (prev) { try { prev.destroy(); } catch (e) {} } });
+  window.__dashCharts.push(new Chart(el1, {
+    type: "line",
+    data: { labels: c.labels, datasets: [
+      dashLine("Sales", "#16a34a", c.sales),
+      dashLine("Payments", "#2563eb", c.collection)
+    ]},
+    options
+  }));
+  window.__dashCharts.push(new Chart(el2, {
+    type: "line",
+    data: { labels: c.labels, datasets: [
+      dashLine("Gross Profit", "#2563eb", c.gross_profit),
+      dashLine("Expenses", "#dc2626", expenses),
+      dashLine("Net Income", "#16a34a", c.net_income)
+    ]},
+    options
+  }));
 }

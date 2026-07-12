@@ -268,7 +268,7 @@ const CRUD = {
       }
     } else {
       const t = f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : (f.type === 'password' ? 'password' : 'text'));
-      input = `<input type="${t}" name="${f.key}"${f.step ? ` step="${f.step}"` : ''} value="${UI.escape(v)}">`;
+      input = `<input type="${t}" name="${f.key}"${f.step ? ` step="${f.step}"` : ''}${f.readonly ? ' readonly' : ''} value="${UI.escape(v)}">`;
       if (f.scan) {
         input = `<span class="input-with-btn">${input}<button type="button" class="btn scan-btn" data-field="${f.key}" title="Scan barcode / QR">▣</button></span>`;
       }

@@ -1,5 +1,5 @@
 /* =====================================================================
-   Adil Business Solutions — Accounts (double-entry ledger)
+   Adil Business Solutions — Accounts (double-entry ledger)  v7.24
    ===================================================================== */
 
 const ACCOUNT_TYPES = ['Income', 'Expense', 'Bank', 'Equity', 'Accounts Receivable', 'Accounts Payable',
@@ -614,12 +614,148 @@ Router.register('check-register', async (mount) => {
 });
 
 /* ---------------------------------------------------------------------
-   PAY BILLS / VIEW PAID BILLS  — depend on the Bills (Purchases) phase
+   PAY BILLS / VIEW PAID BILLS  — supplier payments (v7.24)
 --------------------------------------------------------------------- */
-function billsPending(mount, title) {
-  mount.innerHTML = `<div class="page-head"><h1>${title}</h1></div>
-    <div class="card"><div class="empty">${UI.icon('truck')}<h3>Arrives with the Purchases phase</h3>
-    <p>${title} needs the <strong>Bills</strong> screen, which is built in the Purchases phase. Once bills exist, supplier payments will post to the ledger here.</p></div></div>`;
+function supplierPayTabs(active) {
+  const tabs = [['pay-bills', 'Pay Bills'], ['view-paid-bills', 'View Paid Bills']];
+  return `<div class="sub-tabs no-print">${tabs.map(([r, l]) => `<button class="sub-tab${r === active ? ' active' : ''}" data-r="${r}">${l}</button>`).join('')}</div>`;
 }
-Router.register('pay-bills', (m) => billsPending(m, 'Pay Bills'));
-Router.register('view-paid-bills', (m) => billsPending(m, 'View Paid Bills'));
+function localToday() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+Router.register('pay-bills', async (mount) => {
+  UI.loading(true);
+  let suppliers, bills;
+  try {
+    await Accounts.load();
+    [suppliers, bills] = await Promise.all([API.list('Suppliers'), API.call('openBills')]);
+  } catch (e) { UI.loading(false); acctErr(mount, 'open bills', e.message); return; }
+  UI.loading(false);
+
+  const suppOpts = '<option value="">General (all suppliers)</option>' +
+    suppliers.map(s => `<option value="${UI.escape(s.id)}">${UI.escape(s.name)}</option>`).join('');
+  let payAccts = Accounts.list.filter(a => a.account_type === 'Bank' && a.is_active !== 'No');
+  if (!payAccts.length) payAccts = Accounts.list.filter(a => a.system_key !== 'undeposited' && a.is_active !== 'No');
+  const acctOpts = payAccts.map(a => `<option value="${UI.escape(a.id)}">${UI.escape(a.account_name)} (${UI.escape(a.account_type)})</option>`).join('');
+  const methodOpts = PAY_METHODS.map(m => `<option>${m}</option>`).join('');
+
+  mount.innerHTML = `
+    ${supplierPayTabs('pay-bills')}
+    <div class="page-head"><h1>Pay Bills</h1><span class="page-sub" id="pb-count"></span></div>
+    <div class="card"><div class="form-grid">
+      <label class="field"><span class="field-label">Pay To</span><select id="pb-supp">${suppOpts}</select></label>
+      <label class="field"><span class="field-label">Date</span><input type="date" id="pb-date" value="${localToday()}"></label>
+      <label class="field"><span class="field-label">Account</span><select id="pb-acct">${acctOpts}</select></label>
+      <label class="field"><span class="field-label">Payment Method</span><select id="pb-method">${methodOpts}</select></label>
+      <label class="field"><span class="field-label">Reference No.</span><input id="pb-ref"></label>
+      <label class="field field--wide"><span class="field-label">Memo</span><input id="pb-memo"></label>
+    </div></div>
+    <div class="card no-pad"><div class="table-wrap" id="pb-table"></div></div>
+    <div class="totals-row"><div></div><div class="totals-box">
+      <div class="totals-line totals-grand"><span>Total to Pay</span><span id="pb-total" class="num">0.00</span></div>
+      <div class="line-add" style="border:none;padding:8px 0 0;"><button class="btn btn--primary btn--block" id="pb-save">Pay</button></div>
+    </div></div>`;
+  wireSubTabs(mount);
+
+  const tableEl = mount.querySelector('#pb-table');
+  const recompute = () => {
+    let total = 0;
+    tableEl.querySelectorAll('.pb-amt').forEach(inp => { total += Number(inp.value || 0); });
+    mount.querySelector('#pb-total').textContent = UI.money(total);
+  };
+  const draw = () => {
+    const sid = mount.querySelector('#pb-supp').value;
+    const list = !sid ? bills : bills.filter(b => String(b.supplier_id) === String(sid));
+    mount.querySelector('#pb-count').textContent = `${list.length} open bill${list.length === 1 ? '' : 's'}`;
+    if (!list.length) {
+      tableEl.innerHTML = `<div class="empty">${UI.icon('check')}<h3>No open bills</h3><p>All bills${sid ? ' for this supplier' : ''} are fully paid.</p></div>`;
+      recompute(); return;
+    }
+    tableEl.innerHTML = `<table class="data-table"><thead><tr>
+        <th>Date</th><th>Bill No.</th><th>Supplier</th>
+        <th class="num">Original</th><th class="num">Paid</th><th class="num">Open Balance</th><th class="num">Amount to Pay</th>
+      </tr></thead><tbody>${list.map(b => `<tr>
+        <td>${UI.escape(UI.date(b.date))}</td>
+        <td><a class="doc-link" href="#edit-bill?id=${encodeURIComponent(b.id)}">${UI.escape(b.bill_no)}</a></td>
+        <td>${UI.escape(b.supplier_name || '—')}</td>
+        <td class="num">${UI.money(b.total)}</td>
+        <td class="num">${UI.money(b.paid)}</td>
+        <td class="num">${UI.money(b.balance)}</td>
+        <td><input class="pb-amt num" data-bill="${UI.escape(b.id)}" data-bal="${UI.escape(b.balance)}" type="number" step="0.01" min="0" placeholder="0.00"></td>
+      </tr>`).join('')}</tbody></table>`;
+    tableEl.querySelectorAll('.pb-amt').forEach(inp => inp.oninput = recompute);
+    recompute();
+  };
+  mount.querySelector('#pb-supp').onchange = draw;
+  draw();
+
+  mount.querySelector('#pb-save').onclick = async () => {
+    const allocations = [];
+    tableEl.querySelectorAll('.pb-amt').forEach(inp => {
+      const amt = Number(inp.value || 0);
+      if (amt > 0) allocations.push({ bill_id: inp.dataset.bill, amount: amt });
+    });
+    if (!allocations.length) { UI.toast('Enter an amount on at least one bill.', 'error'); return; }
+    const acct = mount.querySelector('#pb-acct').value;
+    if (!acct) { UI.toast('Select the account to pay from.', 'error'); return; }
+    UI.loading(true, 'Recording payment…');
+    try {
+      await API.call('savePayBills', { data: {
+        date: mount.querySelector('#pb-date').value,
+        supplier_id: mount.querySelector('#pb-supp').value,
+        account_id: acct,
+        method: mount.querySelector('#pb-method').value,
+        reference_no: mount.querySelector('#pb-ref').value,
+        memo: mount.querySelector('#pb-memo').value,
+        allocations
+      }});
+      UI.loading(false); UI.toast('Payment recorded.', 'success'); Router.go('view-paid-bills');
+    } catch (e) { UI.loading(false); UI.toast(e.message, 'error'); }
+  };
+});
+
+Router.register('view-paid-bills', async (mount) => {
+  UI.loading(true);
+  let pays;
+  try { pays = await API.call('listSupplierPayments'); }
+  catch (e) { UI.loading(false); acctErr(mount, 'supplier payments', e.message); return; }
+  UI.loading(false);
+
+  mount.innerHTML = `
+    ${supplierPayTabs('view-paid-bills')}
+    <div class="page-head"><h1>View Paid Bills</h1><span class="page-sub" id="vpb-count"></span>
+      <div class="page-actions">
+        <input id="vpb-q" class="search-input" placeholder="Search…">
+        <button class="btn btn--primary" id="vpb-new">Pay Bills</button>
+      </div>
+    </div>
+    <div class="card no-pad"><div class="table-wrap" id="vpb-table"></div></div>`;
+  wireSubTabs(mount);
+  mount.querySelector('#vpb-new').onclick = () => Router.go('pay-bills');
+
+  const draw = (list) => {
+    mount.querySelector('#vpb-count').textContent = `${list.length} payment${list.length === 1 ? '' : 's'}`;
+    const t = mount.querySelector('#vpb-table');
+    if (!list.length) { t.innerHTML = `<div class="empty">${UI.icon('file-text')}<h3>No supplier payments yet</h3><p>Click “Pay Bills” to record one.</p></div>`; return; }
+    t.innerHTML = `<table class="data-table"><thead><tr>
+        <th>Date</th><th>Reference No.</th><th>Memo</th><th>Supplier</th><th class="num">Amount</th><th>Account</th>
+      </tr></thead><tbody>${list.map(p => `<tr>
+        <td>${UI.escape(UI.date(p.date))}</td>
+        <td>${UI.escape(p.reference_no || '')}</td>
+        <td>${UI.escape(p.memo || '')}</td>
+        <td>${UI.escape(p.supplier || '')}</td>
+        <td class="num">${UI.money(p.amount)}</td>
+        <td>${UI.escape(p.account || '')}</td>
+      </tr>`).join('')}</tbody></table>`;
+  };
+  const q = mount.querySelector('#vpb-q');
+  const apply = () => {
+    const s = q.value.trim().toLowerCase();
+    draw(!s ? pays : pays.filter(p =>
+      ((p.reference_no || '') + ' ' + (p.memo || '') + ' ' + (p.supplier || '') + ' ' + (p.account || '') + ' ' + (p.method || '')).toLowerCase().indexOf(s) !== -1));
+  };
+  q.oninput = apply;
+  apply();
+});
