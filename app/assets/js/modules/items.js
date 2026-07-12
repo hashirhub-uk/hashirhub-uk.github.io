@@ -54,11 +54,9 @@ const itemsCfg = {
 
 Router.register('items',    (m) => CRUD.page(m, itemsCfg));
 Router.register('new-item', (m) => {
-  CRUD.page(m, itemsCfg, { openNew: true });
-  if (window.__SCAN_NEWITEM_CODE) {
-    var code = window.__SCAN_NEWITEM_CODE; window.__SCAN_NEWITEM_CODE = null;
-    setTimeout(function () { var inp = document.querySelector('[name="unique_id"]'); if (inp) inp.value = code; }, 350);
-  }
+  var pre = window.__SCAN_NEWITEM_CODE ? { unique_id: window.__SCAN_NEWITEM_CODE } : null;
+  window.__SCAN_NEWITEM_CODE = null;
+  CRUD.page(m, itemsCfg, { openNew: true, prefill: pre });
 });
 
 /* =====================================================================

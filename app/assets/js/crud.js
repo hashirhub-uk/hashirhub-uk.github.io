@@ -77,7 +77,7 @@ const CRUD = {
     };
 
     mount.querySelector('#crud-new').onclick = () => this.openForm(cfg, state, render, null);
-    if (opts.openNew) this.openForm(cfg, state, render, null);
+    if (opts.openNew) this.openForm(cfg, state, render, null, opts.prefill);
   },
 
   // ---- table ----------------------------------------------------------
@@ -138,8 +138,8 @@ const CRUD = {
     };
   },
 
-  async openForm(cfg, state, render, id) {
-    const record = id ? (state.rows.find(r => String(r.id) === String(id)) || {}) : {};
+  async openForm(cfg, state, render, id, prefill) {
+    const record = id ? (state.rows.find(r => String(r.id) === String(id)) || {}) : (prefill || {});
 
     let bodyHtml, large = '';
     if (cfg.tabs && cfg.tabs.length) {
