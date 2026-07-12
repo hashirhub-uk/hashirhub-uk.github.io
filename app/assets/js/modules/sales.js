@@ -250,7 +250,7 @@ const SalesEditor = {
       </div>
 
       <div class="card no-pad">
-        <div class="table-wrap"><table class="data-table line-table">
+        <div class="table-wrap line-scroll"><table class="data-table line-table">
           <thead><tr>
             <th style="min-width:180px;">Item</th><th>Description</th>
             <th class="num">Qty</th><th class="num">Unit Price</th><th>Discount</th>

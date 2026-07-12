@@ -591,7 +591,7 @@ Router.register("report-general-ledger", (m, p) => reportScreen(m, {
     <select id="rpt-gl-acct"><option value="">All Accounts</option></select></label>`,
   gatherExtra(mount) { return { account_id: mount.querySelector("#rpt-gl-acct").value }; },
   async init(mount, params) {
-    const accts = await API.list("accounts");
+    const accts = await API.list("Accounts");
     const sel = mount.querySelector("#rpt-gl-acct");
     accts.forEach(a => sel.add(new Option(a.account_name, a.id)));
     if (params && params.id) { sel.value = params.id; mount.querySelector("#rpt-run").click(); }
