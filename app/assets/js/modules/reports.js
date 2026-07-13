@@ -629,8 +629,8 @@ Router.register("report-general-ledger", (m, p) => reportScreen(m, {
 async function invFilters(mount, opts) {
   opts = opts || {};
   let warehouses = [], categories = [], suppliers = [];
-  try { warehouses = await API.list("warehouses"); } catch(e){}
-  try { categories = await API.list("categories"); } catch(e){}
+  try { warehouses = await API.list("Warehouses"); } catch(e){}
+  try { categories = await API.list("Categories"); } catch(e){}
   if (opts.vendors) { try { suppliers = await API.list("Suppliers"); } catch(e){} }
   const whOpts = `<option value="">All Warehouses</option>${warehouses.map(w=>`<option value="${UI.escape(String(w.id))}">${UI.escape(w.warehouse_name)}</option>`).join("")}`;
   const catOpts = `<option value="">All Categories</option>${categories.map(c=>`<option value="${UI.escape(String(c.id))}">${UI.escape(c.name)}</option>`).join("")}`;
@@ -662,21 +662,35 @@ Router.register("report-inv-onhand", async (mount) => {
   const run = async () => {
     UI.loading(true, "Loading…");
     try {
-      const rows = await API.call("reportInventoryOnhand", { warehouse: mount.querySelector("#f-wh").value, category: mount.querySelector("#f-cat").value });
-      const statusBadge = s => s==="Out"?'<span class="badge badge--bad">Out</span>':s==="Low"?'<span class="badge badge--warn">Low</span>':'<span class="badge badge--ok">OK</span>';
+      const res = await API.call("reportInventoryOnhand", { warehouse: mount.querySelector("#f-wh").value, category: mount.querySelector("#f-cat").value });
+      const whs = (res && res.warehouses) || [];
+      const items = (res && res.items) || [];
+      // group items by category (Diyar style)
+      const groups = {};
+      items.forEach(it => { const c = it.category || "Uncategorized"; (groups[c] = groups[c] || []).push(it); });
+      const catNames = Object.keys(groups).sort((a,b)=>a.localeCompare(b));
+      const colCount = 2 + whs.length + 1;
+      const whHead = whs.map(w=>`<th class="num">${UI.escape(w)}</th>`).join("");
+      const colTotals = whs.map(()=>0); let grand = 0;
+      const bodyHtml = catNames.map(cat => {
+        const rowsHtml = groups[cat].map(it => {
+          const cells = whs.map((w,idx)=>{ const q = Number((it.by_wh && it.by_wh[w]) || 0); colTotals[idx]+=q; return `<td class="num">${q}</td>`; }).join("");
+          grand += Number(it.total || 0);
+          return `<tr><td>${UI.escape(it.name)}</td><td>${UI.escape(it.sku)}</td>${cells}<td class="num"><strong>${Number(it.total || 0)}</strong></td></tr>`;
+        }).join("");
+        return `<tr class="group-row"><td colspan="${colCount}" style="background:#f1f5f9"><strong>${UI.escape(cat)}</strong></td></tr>${rowsHtml}`;
+      }).join("");
+      const footCells = colTotals.map(t=>`<td class="num"><strong>${t}</strong></td>`).join("");
+      const whSel = mount.querySelector("#f-wh");
+      const whLabel = (whSel && whSel.selectedOptions[0]) ? whSel.selectedOptions[0].textContent : "All Warehouses";
       mount.querySelector("#rpt-out").innerHTML = `<div class="card no-print-card">
         <div class="report-head"><div class="report-co">${UI.escape((co&&co.name)||"")}</div>
-          <div class="report-title">Quantity On-hand by Warehouse</div></div>
+          <div class="report-title">Quantity On-hand by Warehouse</div>
+          <div class="report-sub" style="font-size:11px;color:#94a3b8">${UI.escape(whLabel)} · Grouped by Category</div></div>
         <div class="table-wrap"><table class="data-table report-table">
-          <thead><tr><th>Item</th><th>SKU</th><th>Category</th><th class="num">On Hand</th><th class="num">Reorder</th><th>Status</th></tr></thead>
-          <tbody>${rows.map(r=>`<tr>
-            <td>${UI.escape(r.name)}</td><td>${UI.escape(r.sku)}</td><td>${UI.escape(r.category)}</td>
-            <td class="num">${r.on_hand}</td><td class="num">${r.reorder}</td><td>${statusBadge(r.status)}</td>
-          </tr>`).join("")}
-          ${!rows.length?`<tr><td colspan="6" class="empty" style="text-align:center;padding:28px">No items found.</td></tr>`:""}
-          </tbody>
-          <tfoot><tr><td colspan="3"><strong>Total Items: ${rows.length}</strong></td>
-            <td class="num"><strong>${rows.reduce((s,r)=>s+r.on_hand,0)}</strong></td><td colspan="2"></td></tr></tfoot>
+          <thead><tr><th>Item</th><th>SKU</th>${whHead}<th class="num">Total</th></tr></thead>
+          <tbody>${bodyHtml || `<tr><td colspan="${colCount}" class="empty" style="text-align:center;padding:28px">No items found.</td></tr>`}</tbody>
+          <tfoot><tr><td colspan="2"><strong>Grand Total</strong></td>${footCells}<td class="num"><strong>${grand}</strong></td></tr></tfoot>
         </table></div></div>`;
     } catch(e) { UI.toast(e.message, "error"); }
     UI.loading(false);

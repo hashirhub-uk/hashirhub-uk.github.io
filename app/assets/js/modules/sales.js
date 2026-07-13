@@ -8,13 +8,21 @@
    ===================================================================== */
 
 const Sales = {
-  items: [], customers: [], reps: [],
+  items: [], customers: [], reps: [], warehouses: [],
 
   async preload() {
-    const [items, customers, reps] = await Promise.all([
-      API.list('Items'), API.list('Customers'), API.list('SalesRepresentatives')
+    const [items, customers, reps, warehouses] = await Promise.all([
+      API.list('Items'), API.list('Customers'), API.list('SalesRepresentatives'), API.list('Warehouses')
     ]);
-    this.items = items; this.customers = customers; this.reps = reps;
+    this.items = items; this.customers = customers; this.reps = reps; this.warehouses = warehouses || [];
+  },
+  // the warehouse a new sales line defaults to: "Display"/"Disp" (the shop) if
+  // present, otherwise the first warehouse, otherwise blank.
+  defaultWarehouse() {
+    const list = this.warehouses || [];
+    const disp = list.find(w => { const n = String(w.warehouse_name || '').toLowerCase(); return n === 'display' || n === 'disp'; });
+    if (disp) return disp.warehouse_name;
+    return list.length ? list[0].warehouse_name : '';
   },
 
   customerName(id, fallback) {
@@ -214,7 +222,7 @@ const SalesEditor = {
       discType: rec.discount ? 'Discount Value' : 'Discount Percent',
       discVal: rec.discount ? String(rec.discount) : '',
       lines: (exItems && exItems.length)
-        ? exItems.map(it => ({ item_id: it.item_id, description: it.description, qty: it.qty, unit_price: it.unit_price, discount: it.discount, line_total: it.line_total }))
+        ? exItems.map(it => ({ item_id: it.item_id, description: it.description, qty: it.qty, unit_price: it.unit_price, discount: it.discount, line_total: it.line_total, warehouse: it.warehouse || Sales.defaultWarehouse() }))
         : [this.blankLine()],
       balanceForward: 0,
       _totals: { subtotal: 0, discount: 0, total: 0 }
@@ -253,6 +261,7 @@ const SalesEditor = {
         <div class="table-wrap line-scroll"><table class="data-table line-table">
           <thead><tr>
             <th style="min-width:180px;">Item</th><th>Description</th>
+            <th style="min-width:120px;">Warehouse</th>
             <th class="num">Qty</th><th class="num">Unit Price</th><th>Discount</th>
             <th class="num">Line Total</th><th class="actions"></th>
           </tr></thead><tbody id="s-lines"></tbody>
@@ -286,6 +295,8 @@ const SalesEditor = {
     const linesEl = mount.querySelector('#s-lines');
     const itemOptions = (sel) => '<option value="">— item —</option>' +
       Sales.items.map(it => `<option value="${UI.escape(it.id)}"${String(it.id) === String(sel) ? ' selected' : ''}>${UI.escape(it.name)}${it.sku ? ' (' + UI.escape(it.sku) + ')' : ''}</option>`).join('');
+    const whOptions = (sel) => (Sales.warehouses.length ? '' : '<option value="">— none —</option>') +
+      Sales.warehouses.map(w => `<option value="${UI.escape(w.warehouse_name)}"${String(w.warehouse_name) === String(sel) ? ' selected' : ''}>${UI.escape(w.warehouse_name)}</option>`).join('');
 
     const recompute = () => {
       let subtotal = 0;
@@ -314,6 +325,7 @@ const SalesEditor = {
         <tr data-i="${i}">
           <td><select class="ln-item">${itemOptions(ln.item_id)}</select></td>
           <td><input class="ln-desc" value="${UI.escape(ln.description || '')}"></td>
+          <td><select class="ln-wh">${whOptions(ln.warehouse != null ? ln.warehouse : Sales.defaultWarehouse())}</select></td>
           <td><input class="ln-qty num" type="number" step="any" value="${UI.escape(ln.qty || '')}"></td>
           <td><input class="ln-price num" type="number" step="0.01" value="${UI.escape(ln.unit_price || '')}"></td>
           <td><input class="ln-disc" value="${UI.escape(ln.discount || '')}" placeholder="0 or 5%"></td>
@@ -398,7 +410,7 @@ const SalesEditor = {
     mount.querySelector('#s-save').onclick = () => this.save(state);
   },
 
-  blankLine() { return { item_id: '', description: '', qty: 1, unit_price: '', discount: '', line_total: 0 }; },
+  blankLine() { return { item_id: '', description: '', qty: 1, unit_price: '', discount: '', line_total: 0, warehouse: Sales.defaultWarehouse() }; },
 
   wireLine(tr, state, recompute, renderLines) {
     const i = Number(tr.dataset.i);
@@ -407,6 +419,8 @@ const SalesEditor = {
     const qty = tr.querySelector('.ln-qty');
     const price = tr.querySelector('.ln-price');
     const disc = tr.querySelector('.ln-disc');
+    const whSel = tr.querySelector('.ln-wh');
+    if (whSel) { if (state.lines[i].warehouse == null) state.lines[i].warehouse = whSel.value; whSel.onchange = () => { state.lines[i].warehouse = whSel.value; }; }
 
     const setQtyHint = async (itemId) => {
       if (!itemId) { qty.title = ''; return; }
@@ -458,7 +472,8 @@ const SalesEditor = {
       lines: lines.map(l => ({
         item_id: l.item_id, description: l.description,
         qty: Number(l.qty || 0), unit_price: Number(l.unit_price || 0),
-        discount: l.discount, line_total: Number(l.line_total || 0)
+        discount: l.discount, line_total: Number(l.line_total || 0),
+        warehouse: l.warehouse || ''
       }))
     };
 
